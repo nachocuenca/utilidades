@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from pathlib import Path
@@ -30,6 +30,10 @@ SALE_DATE_PATTERN = re.compile(
 RETURN_DATE_PATTERN = re.compile(
     r"Fecha\s+de\s+devoluci[oó]n\s*:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})",
     re.IGNORECASE,
+)
+
+F0018_TEXTUAL_DATE_PATTERN = re.compile(
+    r"\b(\d{1,2})\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)\s+(\d{4})\b"
 )
 
 STANDARD_INVOICE_NUMBER_PATTERN = re.compile(
@@ -146,9 +150,6 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
         return self.SUPPLIER_TAX_ID
 
     def extract_obramat_customer_name(self, text: str) -> str:
-        normalized_text = re.sub(r"\s+", " ", text).upper()
-        if "DANIEL" in normalized_text and "CUENCA" in normalized_text:
-            return self.DEFAULT_CUSTOMER_NAME
         return self.DEFAULT_CUSTOMER_NAME
 
     def extract_obramat_customer_tax_id(self, text: str) -> str:
@@ -172,8 +173,7 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
 
         text_match = ALTERNATIVE_INVOICE_NUMBER_PATTERN.search(text)
         if text_match:
-            raw_value = text_match.group(1).replace("_", "/")
-            return self.clean_invoice_number_candidate(raw_value)
+            return self.clean_invoice_number_candidate(text_match.group(1).replace("_", "/"))
 
         from_filename = self.extract_filename_invoice_number(
             file_path,
@@ -200,6 +200,11 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
         if match:
             return match.group(1)
 
+        if self.is_f0018_layout(text):
+            f0018_date = self.extract_f0018_date(text)
+            if f0018_date:
+                return f0018_date
+
         top_text = "\n".join(self.extract_lines(text)[:8])
         top_date = normalize_date(top_text)
         if top_date:
@@ -207,14 +212,29 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
 
         return self.extract_filename_date(file_path) or self.extract_date(text)
 
+    def extract_f0018_date(self, text: str) -> str | None:
+        lines = self.extract_lines(text)
+
+        for line in lines[:6]:
+            match = F0018_TEXTUAL_DATE_PATTERN.search(line)
+            if not match:
+                continue
+
+            day, month, year = match.groups()
+            normalized = normalize_date(f"{day} de {month} de {year}")
+            if normalized:
+                return normalized
+
+        return None
+
     def extract_obramat_tax_breakdown(self, text: str) -> tuple[float | None, float | None, float | None]:
-        if self.is_f0018_layout(text):
-            triplet = self.extract_f0018_tax_breakdown(text)
+        if self.is_rectificative_layout(text):
+            triplet = self.extract_rectificative_tax_breakdown(text)
             if triplet is not None:
                 return triplet
 
-        if self.is_rectificative_layout(text):
-            triplet = self.extract_rectificative_tax_breakdown(text)
+        if self.is_f0018_layout(text):
+            triplet = self.extract_f0018_tax_breakdown(text)
             if triplet is not None:
                 return triplet
 
@@ -224,6 +244,9 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
 
         return (None, None, None)
 
+    def is_rectificative_layout(self, text: str) -> bool:
+        return "factura rectificativa" in text.lower()
+
     def is_f0018_layout(self, text: str) -> bool:
         normalized_text = text.lower()
         return (
@@ -231,9 +254,6 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
             or "desglose totales" in normalized_text
             or "factura emitida por 018" in normalized_text
         )
-
-    def is_rectificative_layout(self, text: str) -> bool:
-        return "factura rectificativa" in text.lower()
 
     def extract_rectificative_tax_breakdown(self, text: str) -> tuple[float | None, float | None, float | None] | None:
         match = RECTIFICATIVE_BREAKDOWN_WITH_IVA_PATTERN.search(text)
@@ -251,6 +271,26 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
                 parse_amount(match.group(2)),
                 parse_amount(match.group(3)),
             )
+
+        lines = self.extract_lines(text)
+        for line in reversed(lines):
+            normalized_line = re.sub(r"\s+", " ", line).strip()
+            if normalized_line == "":
+                continue
+
+            if "modos de pagos" in normalized_line.lower():
+                continue
+
+            amounts = self._parse_amounts_from_line(normalized_line)
+            if len(amounts) >= 4:
+                triplet = self._extract_triplet_from_amounts(amounts[1:], prefer_tail=False)
+                if triplet is not None:
+                    return triplet
+
+            if len(amounts) >= 3:
+                triplet = self._extract_triplet_from_amounts(amounts, prefer_tail=True)
+                if triplet is not None:
+                    return triplet
 
         return None
 
@@ -271,8 +311,10 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
                 if "IVA" not in upper_line and "EUR" not in upper_line:
                     continue
 
-                amounts = self._parse_amounts_from_line(candidate_line)
-                triplet = self._extract_triplet_from_amounts(amounts, prefer_tail=True)
+                triplet = self._extract_triplet_from_amounts(
+                    self._parse_amounts_from_line(candidate_line),
+                    prefer_tail=True,
+                )
                 if triplet is not None:
                     return triplet
 
@@ -289,24 +331,21 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
                 if any(marker in lowered for marker in self._ignored_breakdown_markers()):
                     continue
 
-                raw_amounts = self._parse_amounts_from_line(normalized_line)
-                if len(raw_amounts) < 3:
+                amounts = self._parse_amounts_from_line(normalized_line)
+                if len(amounts) < 3:
                     continue
 
                 if "iva" in lowered:
-                    triplet = self._extract_triplet_from_amounts(raw_amounts, prefer_tail=True)
+                    triplet = self._extract_triplet_from_amounts(amounts, prefer_tail=True)
                     if triplet is not None:
                         return triplet
 
-                if "tasa iva/igic/ipsi" in lowered or "total iva/igic/ipsi" in lowered or "total tti" in lowered:
-                    continue
-
-                if len(raw_amounts) >= 4:
-                    triplet = self._extract_triplet_from_amounts(raw_amounts[1:], prefer_tail=False)
+                if len(amounts) >= 4:
+                    triplet = self._extract_triplet_from_amounts(amounts[1:], prefer_tail=False)
                     if triplet is not None:
                         return triplet
 
-                triplet = self._extract_triplet_from_amounts(raw_amounts, prefer_tail=True)
+                triplet = self._extract_triplet_from_amounts(amounts, prefer_tail=True)
                 if triplet is not None:
                     return triplet
 
