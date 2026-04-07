@@ -67,7 +67,7 @@ Total IVA/IGIC/IPSI Total TTI (EUR)
 21.00 27.69 5.81 33,50
 """
 
-OBRAMAT_RECTIFICATIVA_WITH_IVA_TEXT = """FACTURA RECTIFICATIVA 029-0001-R089568
+OBRAMAT_RECTIFICATIVA_R089568_TEXT = """FACTURA RECTIFICATIVA 029-0001-R089568
 DUPLICADO
 Ejemplar cliente
 BRICOLAJE BRICOMAN, S.L.U. R.M. Madrid Tomo 21.744, Secc. 8 del Libro 0, Folio 21, Hoja M-387251
@@ -92,7 +92,31 @@ Total IVA/IGIC/IPSI Total TTI (EUR)
 IVA 21.00% -21.98 -4.61 -26,59
 """
 
-OBRAMAT_RECTIFICATIVA_WITHOUT_IVA_TEXT = """FACTURA RECTIFICATIVA 029-0002-R090760
+OBRAMAT_RECTIFICATIVA_R088917_TEXT = """FACTURA RECTIFICATIVA 029-0001-R088917
+DUPLICADO
+Ejemplar cliente
+BRICOLAJE BRICOMAN, S.L.U. R.M. Madrid Tomo 21.744, Secc. 8 del Libro 0, Folio 21, Hoja M-387251
+RAZON SOCIAL Calle Margarita Salas, 6, 28919-Leganes (Madrid) C.I.F. B-84406289
+BRICOLAJE BRICOMAN,S.L.U
+CIF: B-84406289
+Avda. Pais Valencia 9
+Teléfono: 965594325
+Finestrat, a 12 Enero 2026
+SR DANIEL CUENCA MOYA
+C/ MARAVALL 31 2 E
+03501 BENIDORM
+ESPAÑA
+Numero NIF : 48334490J
+Numero de cuenta : 2225777
+Telefono : 613026600
+Fecha de devolucion : 12/01/2026
+Ticket de caja : 029-000008-013-1787-NFS: 000525 12/01/2026 13:23 Devolucion Mercancias
+Tasa IVA/IGIC/IPSI Total. SI (EUR)
+Total IVA/IGIC/IPSI Total TTI (EUR)
+IVA 21.00% -3.8 -0.8 -4,60
+"""
+
+OBRAMAT_RECTIFICATIVA_R090760_TEXT = """FACTURA RECTIFICATIVA 029-0002-R090760
 DUPLICADO
 Ejemplar cliente
 BRICOLAJE BRICOMAN, S.L.U. R.M. Madrid Tomo 21.744, Secc. 8 del Libro 0, Folio 21, Hoja M-387251
@@ -249,11 +273,11 @@ def test_obramat_extracts_tax_breakdown_without_explicit_iva_label() -> None:
     assert result.total == pytest.approx(33.50)
 
 
-def test_obramat_supports_rectificative_negative_amounts_with_iva_label() -> None:
+def test_obramat_extracts_rectificativa_r089568() -> None:
     parser = ObramatInvoiceParser()
 
     result = parser.parse(
-        OBRAMAT_RECTIFICATIVA_WITH_IVA_TEXT,
+        OBRAMAT_RECTIFICATIVA_R089568_TEXT,
         Path(r"C:\temp\OBRAMAT - N° Factura029-0001-R089568.pdf"),
     )
 
@@ -265,11 +289,27 @@ def test_obramat_supports_rectificative_negative_amounts_with_iva_label() -> Non
     assert result.total == pytest.approx(-26.59)
 
 
-def test_obramat_supports_rectificative_negative_amounts_without_iva_label() -> None:
+def test_obramat_extracts_rectificativa_r088917() -> None:
     parser = ObramatInvoiceParser()
 
     result = parser.parse(
-        OBRAMAT_RECTIFICATIVA_WITHOUT_IVA_TEXT,
+        OBRAMAT_RECTIFICATIVA_R088917_TEXT,
+        Path(r"C:\temp\OBRAMAT - N° Factura029-0001-R088917.pdf"),
+    )
+
+    assert result.parser_usado == "obramat"
+    assert result.numero_factura == "029-0001-R088917"
+    assert result.fecha_factura == "12-01-2026"
+    assert result.subtotal == pytest.approx(-3.80)
+    assert result.iva == pytest.approx(-0.80)
+    assert result.total == pytest.approx(-4.60)
+
+
+def test_obramat_extracts_rectificativa_r090760() -> None:
+    parser = ObramatInvoiceParser()
+
+    result = parser.parse(
+        OBRAMAT_RECTIFICATIVA_R090760_TEXT,
         Path(r"C:\temp\OBRAMAT - N° Factura029-0002-R090760.pdf"),
     )
 
