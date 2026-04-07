@@ -24,6 +24,9 @@ if "invoice_search" not in st.session_state:
 if "selected_invoice_id" not in st.session_state:
     st.session_state["selected_invoice_id"] = None
 
+if "scan_dir_input" not in st.session_state:
+    st.session_state["scan_dir_input"] = str(service.settings.inbox_dir)
+
 search = st.text_input(
     "Buscar",
     value=st.session_state["invoice_search"],
@@ -31,9 +34,45 @@ search = st.text_input(
 )
 st.session_state["invoice_search"] = search
 
+st.subheader("Origen de escaneo")
+
+scan_col1, scan_col2 = st.columns([5, 1])
+
+with scan_col1:
+    scan_dir_input = st.text_input(
+        "Carpeta a escanear",
+        value=st.session_state["scan_dir_input"],
+        placeholder=r"C:\Users\ignac\Downloads\Facturas",
+    )
+    st.session_state["scan_dir_input"] = scan_dir_input
+
+with scan_col2:
+    st.write("")
+    st.write("")
+    if st.button("Usar inbox", use_container_width=True):
+        st.session_state["scan_dir_input"] = str(service.settings.inbox_dir)
+        st.rerun()
+
+resolved_scan_dir: Path | None = None
+scan_dir_error: str | None = None
+
+try:
+    resolved_scan_dir = service.resolve_scan_dir(scan_dir_input)
+    if not resolved_scan_dir.exists():
+        scan_dir_error = f"La carpeta no existe: {resolved_scan_dir}"
+    elif not resolved_scan_dir.is_dir():
+        scan_dir_error = f"La ruta no es una carpeta: {resolved_scan_dir}"
+except Exception as error:
+    scan_dir_error = str(error)
+
+if scan_dir_error:
+    st.warning(scan_dir_error)
+else:
+    st.caption(f"Carpeta activa: {resolved_scan_dir}")
+
 parser_options = ["auto", *registry.list_names()]
 
-control_col1, control_col2 = st.columns([2, 1])
+control_col1, control_col2, control_col3, control_col4 = st.columns([2, 1, 1, 1])
 with control_col1:
     selected_parser = st.selectbox(
         "Parser para el reescaneo",
@@ -45,16 +84,26 @@ with control_col1:
 with control_col2:
     skip_known = st.toggle("Omitir ya procesadas", value=False)
 
+with control_col3:
+    recursive = st.toggle("Recursivo", value=False)
+
+with control_col4:
+    only_manual_review = st.toggle("Solo revisar", value=False)
+
 button_col1, button_col2, button_col3 = st.columns(3)
 
 with button_col1:
     if st.button("Reescanear carpeta", use_container_width=True):
-        summary = service.rescan_inbox(
-            parser_name=None if selected_parser == "auto" else selected_parser,
-            recursive=False,
-            skip_known=skip_known,
-        )
-        st.session_state["last_scan_summary"] = summary
+        if scan_dir_error:
+            st.error("Corrige la carpeta de escaneo antes de continuar.")
+        else:
+            summary = service.rescan_inbox(
+                parser_name=None if selected_parser == "auto" else selected_parser,
+                recursive=recursive,
+                skip_known=skip_known,
+                inbox_dir=resolved_scan_dir,
+            )
+            st.session_state["last_scan_summary"] = summary
 
 with button_col2:
     if st.button("Exportar CSV", use_container_width=True):
@@ -87,6 +136,7 @@ with download_col2:
 dataframe = service.list_invoices_dataframe(
     search=search or None,
     visible_only=True,
+    only_manual_review=True if only_manual_review else None,
 )
 
 st.subheader("Tabla de facturas")
@@ -94,13 +144,23 @@ st.subheader("Tabla de facturas")
 if dataframe.empty:
     st.info("No hay facturas guardadas todavia.")
 else:
+    dataframe = dataframe.copy()
+    dataframe["requiere_revision_manual"] = dataframe["requiere_revision_manual"].map(
+        lambda value: "Sí" if bool(value) else "No"
+    )
+
     st.dataframe(
         dataframe,
         use_container_width=True,
         hide_index=True,
     )
 
-    rows = dataframe.to_dict(orient="records")
+    rows = service.list_invoices_dataframe(
+        search=search or None,
+        visible_only=False,
+        only_manual_review=True if only_manual_review else None,
+    ).to_dict(orient="records")
+
     invoice_ids = [int(row["id"]) for row in rows]
     label_map = {int(row["id"]): build_invoice_option_label(row) for row in rows}
 
@@ -123,4 +183,4 @@ else:
     if st.button("Abrir detalle", use_container_width=True):
         st.switch_page("src/ui/pages/2_Detalle.py")
 
-st.caption(f"Carpeta monitorizada: {Path(service.settings.inbox_dir)}")
+st.caption(f"Ruta por defecto configurada: {Path(service.settings.inbox_dir)}")

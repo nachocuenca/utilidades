@@ -14,6 +14,8 @@ VISIBLE_TABLE_COLUMNS = [
     "id",
     "archivo",
     "parser_usado",
+    "extractor_origen",
+    "requiere_revision_manual",
     "nombre_proveedor",
     "nombre_cliente",
     "nif_cliente",
@@ -41,16 +43,21 @@ class InvoiceService:
             export_dir=self.settings.export_dir,
         )
 
+    def resolve_scan_dir(self, inbox_dir: str | Path | None = None) -> Path:
+        return self.scanner.resolve_scan_dir(inbox_dir)
+
     def rescan_inbox(
         self,
         parser_name: str | None = None,
         recursive: bool = False,
         skip_known: bool = False,
+        inbox_dir: str | Path | None = None,
     ) -> ScanSummary:
         return self.scanner.scan(
             parser_name=parser_name,
             recursive=recursive,
             skip_known=skip_known,
+            inbox_dir=inbox_dir,
         )
 
     def scan_single_file(
@@ -68,15 +75,20 @@ class InvoiceService:
         search: str | None = None,
         limit: int | None = None,
         offset: int = 0,
+        only_manual_review: bool | None = None,
     ) -> list[InvoiceRecord]:
         return self.repository.list_invoices(
             search=search,
             limit=limit,
             offset=offset,
+            only_manual_review=only_manual_review,
         )
 
-    def count_invoices(self, search: str | None = None) -> int:
-        return self.repository.count(search=search)
+    def count_invoices(self, search: str | None = None, only_manual_review: bool | None = None) -> int:
+        return self.repository.count(
+            search=search,
+            only_manual_review=only_manual_review,
+        )
 
     def get_invoice(self, invoice_id: int) -> InvoiceRecord | None:
         return self.repository.get_by_id(invoice_id)
@@ -93,11 +105,13 @@ class InvoiceService:
         limit: int | None = None,
         offset: int = 0,
         visible_only: bool = True,
+        only_manual_review: bool | None = None,
     ) -> pd.DataFrame:
         records = self.list_invoices(
             search=search,
             limit=limit,
             offset=offset,
+            only_manual_review=only_manual_review,
         )
 
         rows: list[dict[str, object | None]] = []
@@ -109,6 +123,9 @@ class InvoiceService:
                     "ruta_archivo": record.ruta_archivo,
                     "hash_archivo": record.hash_archivo,
                     "parser_usado": record.parser_usado,
+                    "extractor_origen": record.extractor_origen,
+                    "requiere_revision_manual": record.requiere_revision_manual,
+                    "motivo_revision": record.motivo_revision,
                     "nombre_proveedor": record.nombre_proveedor,
                     "nombre_cliente": record.nombre_cliente,
                     "nif_cliente": record.nif_cliente,
@@ -126,35 +143,38 @@ class InvoiceService:
 
         dataframe = pd.DataFrame(rows)
 
+        all_columns = [
+            "id",
+            "archivo",
+            "ruta_archivo",
+            "hash_archivo",
+            "parser_usado",
+            "extractor_origen",
+            "requiere_revision_manual",
+            "motivo_revision",
+            "nombre_proveedor",
+            "nombre_cliente",
+            "nif_cliente",
+            "cp_cliente",
+            "numero_factura",
+            "fecha_factura",
+            "subtotal",
+            "iva",
+            "total",
+            "texto_crudo",
+            "created_at",
+            "updated_at",
+        ]
+
         if dataframe.empty:
             if visible_only:
                 return pd.DataFrame(columns=VISIBLE_TABLE_COLUMNS)
-            return pd.DataFrame(
-                columns=[
-                    "id",
-                    "archivo",
-                    "ruta_archivo",
-                    "hash_archivo",
-                    "parser_usado",
-                    "nombre_proveedor",
-                    "nombre_cliente",
-                    "nif_cliente",
-                    "cp_cliente",
-                    "numero_factura",
-                    "fecha_factura",
-                    "subtotal",
-                    "iva",
-                    "total",
-                    "texto_crudo",
-                    "created_at",
-                    "updated_at",
-                ]
-            )
+            return pd.DataFrame(columns=all_columns)
 
         if visible_only:
             return dataframe[VISIBLE_TABLE_COLUMNS]
 
-        return dataframe
+        return dataframe[all_columns]
 
     def get_invoice_detail(self, invoice_id: int) -> dict[str, object | None]:
         record = self.get_invoice(invoice_id)
@@ -167,6 +187,9 @@ class InvoiceService:
             "ruta_archivo": record.ruta_archivo,
             "hash_archivo": record.hash_archivo,
             "parser_usado": record.parser_usado,
+            "extractor_origen": record.extractor_origen,
+            "requiere_revision_manual": record.requiere_revision_manual,
+            "motivo_revision": record.motivo_revision,
             "nombre_proveedor": record.nombre_proveedor,
             "nombre_cliente": record.nombre_cliente,
             "nif_cliente": record.nif_cliente,
