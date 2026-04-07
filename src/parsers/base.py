@@ -20,6 +20,7 @@ class ParsedInvoiceData:
     archivo: str
     ruta_archivo: str
     nombre_proveedor: str | None = None
+    nif_proveedor: str | None = None
     nombre_cliente: str | None = None
     nif_cliente: str | None = None
     cp_cliente: str | None = None
@@ -33,6 +34,7 @@ class ParsedInvoiceData:
 
     def finalize(self) -> "ParsedInvoiceData":
         self.nombre_proveedor = clean_name_candidate(self.nombre_proveedor)
+        self.nif_proveedor = normalize_tax_id(self.nif_proveedor)
         self.nombre_cliente = clean_name_candidate(self.nombre_cliente)
         self.nif_cliente = normalize_tax_id(self.nif_cliente)
         self.cp_cliente = normalize_postal_code(self.cp_cliente)
@@ -76,6 +78,30 @@ class BaseInvoiceParser(ABC):
 
     def extract_lines(self, text: str) -> list[str]:
         return split_clean_lines(text)
+
+    def get_path_text(self, file_path: str | Path | None) -> str:
+        if file_path is None:
+            return ""
+        return str(Path(file_path)).replace("\\", "/").lower()
+
+    def matches_file_path_hint(self, file_path: str | Path | None, hints: tuple[str, ...] | list[str]) -> bool:
+        path_text = self.get_path_text(file_path)
+        if path_text == "":
+            return False
+        return any(hint.lower() in path_text for hint in hints)
+
+    def get_folder_hint_name(self, file_path: str | Path | None) -> str | None:
+        if file_path is None:
+            return None
+
+        path = Path(file_path)
+        parent_name = path.parent.name.strip()
+        if parent_name == "":
+            return None
+
+        parent_name = parent_name.replace("_", " ").replace("-", " ")
+        parent_name = re.sub(r"\s+", " ", parent_name).strip()
+        return clean_name_candidate(parent_name)
 
     def extract_date(self, text: str) -> str | None:
         label_patterns = [
@@ -169,6 +195,24 @@ class BaseInvoiceParser(ABC):
         label_patterns = [
             r"(?:nif|cif|dni|nie)\s*(?:cliente)?\s*[:\-]?\s*([^\n\r]+)",
             r"(?:vat|tax\s+id)\s*[:\-]?\s*([^\n\r]+)",
+        ]
+
+        for pattern_text in label_patterns:
+            match = re.search(pattern_text, text, re.IGNORECASE)
+            if not match:
+                continue
+
+            candidate = normalize_tax_id(match.group(1))
+            if candidate:
+                return candidate
+
+        candidates = extract_tax_ids(text)
+        return candidates[0] if candidates else None
+
+    def extract_supplier_tax_id(self, text: str) -> str | None:
+        label_patterns = [
+            r"(?:cif|nif)\s*(?:proveedor|emisor|empresa|raz[oó]n\s+social)?\s*[:\-]?\s*([^\n\r]+)",
+            r"(?:proveedor|emisor|empresa|raz[oó]n\s+social)\s*[:\-]?\s*[^\n\r]{0,80}?(?:cif|nif)\s*[:\-]?\s*([A-Z0-9\-\s\.]+)",
         ]
 
         for pattern_text in label_patterns:

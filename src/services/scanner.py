@@ -187,7 +187,7 @@ class InvoiceScanner:
             motivo_revision=review_reason,
             carpeta_origen=folder_origin,
             nombre_proveedor=parsed.nombre_proveedor,
-            nif_proveedor=None,
+            nif_proveedor=parsed.nif_proveedor,
             nombre_cliente=parsed.nombre_cliente,
             nif_cliente=parsed.nif_cliente,
             cp_cliente=parsed.cp_cliente,

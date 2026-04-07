@@ -4,8 +4,15 @@ from pathlib import Path
 
 from src.parsers.agus import AgusInvoiceParser
 from src.parsers.base import BaseInvoiceParser
+from src.parsers.edieuropa import EdieuropaInvoiceParser
+from src.parsers.eseaforms import EseaformsInvoiceParser
 from src.parsers.generic import GenericInvoiceParser
+from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 from src.parsers.maria import MariaInvoiceParser
+from src.parsers.mercaluz import MercaluzInvoiceParser
+from src.parsers.obramat import ObramatInvoiceParser
+from src.parsers.repsol import RepsolInvoiceParser
+from src.parsers.saltoki import SaltokiInvoiceParser
 
 
 class ParserRegistry:
@@ -14,8 +21,15 @@ class ParserRegistry:
         self._register_defaults()
 
     def _register_defaults(self) -> None:
+        self.register(ObramatInvoiceParser())
+        self.register(SaltokiInvoiceParser())
+        self.register(MercaluzInvoiceParser())
+        self.register(RepsolInvoiceParser())
+        self.register(EseaformsInvoiceParser())
+        self.register(EdieuropaInvoiceParser())
         self.register(MariaInvoiceParser())
         self.register(AgusInvoiceParser())
+        self.register(GenericSupplierInvoiceParser())
         self.register(GenericInvoiceParser())
 
     def register(self, parser: BaseInvoiceParser) -> None:
