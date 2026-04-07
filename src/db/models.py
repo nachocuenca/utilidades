@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Mapping
+
+INVOICE_DB_FIELDS = (
+    "archivo",
+    "ruta_archivo",
+    "hash_archivo",
+    "parser_usado",
+    "nombre_proveedor",
+    "nombre_cliente",
+    "nif_cliente",
+    "cp_cliente",
+    "numero_factura",
+    "fecha_factura",
+    "subtotal",
+    "iva",
+    "total",
+    "texto_crudo",
+)
+
+
+@dataclass(slots=True, kw_only=True)
+class InvoiceUpsertData:
+    archivo: str
+    ruta_archivo: str
+    hash_archivo: str
+    parser_usado: str = "generic"
+    nombre_proveedor: str | None = None
+    nombre_cliente: str | None = None
+    nif_cliente: str | None = None
+    cp_cliente: str | None = None
+    numero_factura: str | None = None
+    fecha_factura: str | None = None
+    subtotal: float | None = None
+    iva: float | None = None
+    total: float | None = None
+    texto_crudo: str = ""
+
+    def as_db_dict(self) -> dict[str, Any]:
+        return {field_name: getattr(self, field_name) for field_name in INVOICE_DB_FIELDS}
+
+
+@dataclass(slots=True, kw_only=True)
+class InvoiceRecord:
+    id: int
+    archivo: str
+    ruta_archivo: str
+    hash_archivo: str
+    parser_usado: str
+    nombre_proveedor: str | None
+    nombre_cliente: str | None
+    nif_cliente: str | None
+    cp_cliente: str | None
+    numero_factura: str | None
+    fecha_factura: str | None
+    subtotal: float | None
+    iva: float | None
+    total: float | None
+    texto_crudo: str
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_row(cls, row: Mapping[str, Any]) -> "InvoiceRecord":
+        return cls(
+            id=int(row["id"]),
+            archivo=row["archivo"],
+            ruta_archivo=row["ruta_archivo"],
+            hash_archivo=row["hash_archivo"],
+            parser_usado=row["parser_usado"],
+            nombre_proveedor=row["nombre_proveedor"],
+            nombre_cliente=row["nombre_cliente"],
+            nif_cliente=row["nif_cliente"],
+            cp_cliente=row["cp_cliente"],
+            numero_factura=row["numero_factura"],
+            fecha_factura=row["fecha_factura"],
+            subtotal=row["subtotal"],
+            iva=row["iva"],
+            total=row["total"],
+            texto_crudo=row["texto_crudo"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
