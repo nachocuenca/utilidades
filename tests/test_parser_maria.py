@@ -14,7 +14,7 @@ def test_maria_parser_detects_known_emitter(load_sample_text) -> None:
     result = parser.parse(text, Path("maria_01.pdf"))
 
     assert result.parser_usado == "maria"
-    assert result.nombre_proveedor == "Maria Gonzalez Arranz"
+    assert result.nombre_proveedor == "María González Arranz"
     assert result.nombre_cliente == "ACME CONSULTING SL"
     assert result.nif_cliente == "B12345678"
     assert result.cp_cliente == "28013"
@@ -32,7 +32,7 @@ def test_maria_parser_calculates_missing_subtotal(load_sample_text) -> None:
     result = parser.parse(text, Path("maria_02.pdf"))
 
     assert result.parser_usado == "maria"
-    assert result.nombre_proveedor == "Maria Gonzalez Arranz"
+    assert result.nombre_proveedor == "María González Arranz"
     assert result.nombre_cliente == "NOVA STUDIO LAB"
     assert result.nif_cliente == "A1B2C3D4"
     assert result.cp_cliente == "46001"

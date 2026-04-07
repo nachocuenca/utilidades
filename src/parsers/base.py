@@ -167,8 +167,8 @@ class BaseInvoiceParser(ABC):
 
     def extract_tax_id_from_text(self, text: str) -> str | None:
         label_patterns = [
-            r"(?:nif|cif|dni|nie)\s*(?:cliente)?\s*[:\-]?\s*([A-Z0-9\-\s\.]+)",
-            r"(?:vat|tax\s+id)\s*[:\-]?\s*([A-Z0-9\-\s\.]+)",
+            r"(?:nif|cif|dni|nie)\s*(?:cliente)?\s*[:\-]?\s*([^\n\r]+)",
+            r"(?:vat|tax\s+id)\s*[:\-]?\s*([^\n\r]+)",
         ]
 
         for pattern_text in label_patterns:

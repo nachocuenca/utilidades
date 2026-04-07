@@ -40,7 +40,7 @@ def test_scanner_processes_pdf_and_persists_result(load_sample_text, monkeypatch
 
     stored = repository.list_invoices()
     assert len(stored) == 1
-    assert stored[0].nombre_proveedor == "Maria Gonzalez Arranz"
+    assert stored[0].nombre_proveedor == "María González Arranz"
     assert stored[0].nombre_cliente == "ACME CONSULTING SL"
 
     second_summary = scanner.scan(skip_known=True)
