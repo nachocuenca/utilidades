@@ -1,0 +1,12 @@
+Maria Gonzalez Arranz
+energyinmotion.es
+Factura M-2026-001
+Fecha factura: 05/03/2026
+
+ACME CONSULTING SL
+NIF: B12345678
+CP: 28013
+
+Base imponible: 23,9669
+IVA: 5,0331
+Total: 29,0000
