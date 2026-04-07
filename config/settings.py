@@ -28,6 +28,20 @@ def _get_int_env(name: str, default: int) -> int:
     return int(raw_value.strip())
 
 
+def _get_bool_env(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+
+    raise ValueError(f"Valor booleano no valido para {name}: {raw_value}")
+
+
 def _resolve_path(value: str) -> Path:
     path = Path(value)
     if not path.is_absolute():
@@ -47,6 +61,11 @@ class Settings:
     default_parser: str
     streamlit_server_address: str
     streamlit_server_port: int
+    ocr_enabled: bool
+    ocr_language: str
+    ocr_render_dpi: int
+    ocr_min_text_length: int
+    ocr_tesseract_cmd: str
 
 
 def ensure_runtime_directories(settings: Settings) -> None:
@@ -71,6 +90,11 @@ def get_settings() -> Settings:
         default_parser=_get_env("DEFAULT_PARSER", "generic"),
         streamlit_server_address=_get_env("STREAMLIT_SERVER_ADDRESS", "127.0.0.1"),
         streamlit_server_port=_get_int_env("STREAMLIT_SERVER_PORT", 8501),
+        ocr_enabled=_get_bool_env("OCR_ENABLED", False),
+        ocr_language=_get_env("OCR_LANGUAGE", "spa+eng"),
+        ocr_render_dpi=_get_int_env("OCR_RENDER_DPI", 200),
+        ocr_min_text_length=_get_int_env("OCR_MIN_TEXT_LENGTH", 30),
+        ocr_tesseract_cmd=_get_env("OCR_TESSERACT_CMD", ""),
     )
 
     ensure_runtime_directories(settings)
