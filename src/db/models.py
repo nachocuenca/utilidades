@@ -8,6 +8,9 @@ INVOICE_DB_FIELDS = (
     "ruta_archivo",
     "hash_archivo",
     "parser_usado",
+    "extractor_origen",
+    "requiere_revision_manual",
+    "motivo_revision",
     "nombre_proveedor",
     "nombre_cliente",
     "nif_cliente",
@@ -27,6 +30,9 @@ class InvoiceUpsertData:
     ruta_archivo: str
     hash_archivo: str
     parser_usado: str = "generic"
+    extractor_origen: str = "unknown"
+    requiere_revision_manual: bool = False
+    motivo_revision: str | None = None
     nombre_proveedor: str | None = None
     nombre_cliente: str | None = None
     nif_cliente: str | None = None
@@ -39,7 +45,9 @@ class InvoiceUpsertData:
     texto_crudo: str = ""
 
     def as_db_dict(self) -> dict[str, Any]:
-        return {field_name: getattr(self, field_name) for field_name in INVOICE_DB_FIELDS}
+        payload = {field_name: getattr(self, field_name) for field_name in INVOICE_DB_FIELDS}
+        payload["requiere_revision_manual"] = int(bool(payload["requiere_revision_manual"]))
+        return payload
 
 
 @dataclass(slots=True, kw_only=True)
@@ -49,6 +57,9 @@ class InvoiceRecord:
     ruta_archivo: str
     hash_archivo: str
     parser_usado: str
+    extractor_origen: str
+    requiere_revision_manual: bool
+    motivo_revision: str | None
     nombre_proveedor: str | None
     nombre_cliente: str | None
     nif_cliente: str | None
@@ -70,6 +81,9 @@ class InvoiceRecord:
             ruta_archivo=row["ruta_archivo"],
             hash_archivo=row["hash_archivo"],
             parser_usado=row["parser_usado"],
+            extractor_origen=row["extractor_origen"],
+            requiere_revision_manual=bool(row["requiere_revision_manual"]),
+            motivo_revision=row["motivo_revision"],
             nombre_proveedor=row["nombre_proveedor"],
             nombre_cliente=row["nombre_cliente"],
             nif_cliente=row["nif_cliente"],

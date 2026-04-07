@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 from src.db.database import get_connection, init_database
@@ -15,6 +14,8 @@ SEARCHABLE_COLUMNS = (
     "numero_factura",
     "fecha_factura",
     "parser_usado",
+    "extractor_origen",
+    "motivo_revision",
 )
 
 
@@ -63,6 +64,9 @@ class InvoiceRepository:
             ruta_archivo,
             hash_archivo,
             parser_usado,
+            extractor_origen,
+            requiere_revision_manual,
+            motivo_revision,
             nombre_proveedor,
             nombre_cliente,
             nif_cliente,
@@ -95,6 +99,9 @@ class InvoiceRepository:
             ruta_archivo,
             hash_archivo,
             parser_usado,
+            extractor_origen,
+            requiere_revision_manual,
+            motivo_revision,
             nombre_proveedor,
             nombre_cliente,
             nif_cliente,
@@ -132,8 +139,12 @@ class InvoiceRepository:
         search: str | None = None,
         limit: int | None = None,
         offset: int = 0,
+        only_manual_review: bool | None = None,
     ) -> list[InvoiceRecord]:
-        where_clause, params = self._build_search_clause(search)
+        where_clause, params = self._build_search_clause(
+            search=search,
+            only_manual_review=only_manual_review,
+        )
 
         query = f"""
         SELECT
@@ -142,6 +153,9 @@ class InvoiceRepository:
             ruta_archivo,
             hash_archivo,
             parser_usado,
+            extractor_origen,
+            requiere_revision_manual,
+            motivo_revision,
             nombre_proveedor,
             nombre_cliente,
             nif_cliente,
@@ -172,8 +186,11 @@ class InvoiceRepository:
 
         return [InvoiceRecord.from_row(row) for row in rows]
 
-    def count(self, search: str | None = None) -> int:
-        where_clause, params = self._build_search_clause(search)
+    def count(self, search: str | None = None, only_manual_review: bool | None = None) -> int:
+        where_clause, params = self._build_search_clause(
+            search=search,
+            only_manual_review=only_manual_review,
+        )
 
         query = f"""
         SELECT COUNT(*) AS total_registros
@@ -189,8 +206,15 @@ class InvoiceRepository:
 
         return int(row["total_registros"])
 
-    def list_for_export(self, search: str | None = None) -> list[dict[str, object | None]]:
-        records = self.list_invoices(search=search)
+    def list_for_export(
+        self,
+        search: str | None = None,
+        only_manual_review: bool | None = None,
+    ) -> list[dict[str, object | None]]:
+        records = self.list_invoices(
+            search=search,
+            only_manual_review=only_manual_review,
+        )
 
         export_rows: list[dict[str, object | None]] = []
         for record in records:
@@ -205,14 +229,27 @@ class InvoiceRepository:
 
         return export_rows
 
-    def _build_search_clause(self, search: str | None) -> tuple[str, list[object]]:
-        if search is None or search.strip() == "":
+    def _build_search_clause(
+        self,
+        search: str | None,
+        only_manual_review: bool | None = None,
+    ) -> tuple[str, list[object]]:
+        clauses: list[str] = []
+        params: list[object] = []
+
+        if search is not None and search.strip() != "":
+            term = f"%{search.strip()}%"
+            expressions = [f"COALESCE({column}, '') LIKE ?" for column in SEARCHABLE_COLUMNS]
+            expressions.append("COALESCE(CAST(total AS TEXT), '') LIKE ?")
+            clauses.append("(" + " OR ".join(expressions) + ")")
+            params.extend([term] * len(expressions))
+
+        if only_manual_review is True:
+            clauses.append("requiere_revision_manual = 1")
+        elif only_manual_review is False:
+            pass
+
+        if not clauses:
             return "", []
 
-        term = f"%{search.strip()}%"
-        expressions = [f"COALESCE({column}, '') LIKE ?" for column in SEARCHABLE_COLUMNS]
-        expressions.append("COALESCE(CAST(total AS TEXT), '') LIKE ?")
-        where_clause = "WHERE " + " OR ".join(expressions)
-        params: list[object] = [term] * len(expressions)
-
-        return where_clause, params
+        return "WHERE " + " AND ".join(clauses), params

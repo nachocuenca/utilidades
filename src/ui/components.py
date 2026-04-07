@@ -35,6 +35,10 @@ def format_text(value: object | None, fallback: str = "-") -> str:
     return text if text else fallback
 
 
+def format_bool_badge(value: object | None) -> str:
+    return "Sí" if bool(value) else "No"
+
+
 def build_invoice_option_label(row: Mapping[str, Any]) -> str:
     invoice_id = format_text(row.get("id"))
     archivo = format_text(row.get("archivo"))
@@ -55,15 +59,18 @@ def render_summary_metrics(service: InvoiceService, search: str | None = None) -
     total_facturas = len(dataframe.index)
     total_importe = 0.0
     total_iva = 0.0
+    total_revision = 0
 
     if not dataframe.empty:
         total_importe = pd.to_numeric(dataframe["total"], errors="coerce").fillna(0).sum()
         total_iva = pd.to_numeric(dataframe["iva"], errors="coerce").fillna(0).sum()
+        total_revision = int(pd.to_numeric(dataframe["requiere_revision_manual"], errors="coerce").fillna(0).sum())
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Facturas", total_facturas)
     col2.metric("Suma total", format_amount(total_importe))
     col3.metric("Suma IVA", format_amount(total_iva))
+    col4.metric("Revisar", total_revision)
 
 
 def render_scan_summary(summary: ScanSummary | None) -> None:
@@ -72,13 +79,14 @@ def render_scan_summary(summary: ScanSummary | None) -> None:
 
     st.success("Reescaneo completado.")
 
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     col1.metric("Encontrados", summary.total_encontrados)
     col2.metric("Procesados", summary.procesados)
     col3.metric("Creados", summary.creados)
     col4.metric("Actualizados", summary.actualizados)
     col5.metric("Omitidos", summary.omitidos)
     col6.metric("Fallidos", summary.fallidos)
+    col7.metric("Revisar", summary.requieren_revision)
 
     if summary.errores:
         st.warning("Algunos archivos no se pudieron procesar.")

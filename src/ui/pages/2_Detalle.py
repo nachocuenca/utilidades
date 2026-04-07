@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.ui.components import format_amount, get_invoice_service, render_detail_field
+from src.ui.components import format_amount, format_bool_badge, get_invoice_service, render_detail_field
 
 st.title("Detalle de factura")
 
@@ -41,6 +41,9 @@ if record is None:
     st.warning(f"No existe la factura con ID {int(invoice_id)}.")
     st.stop()
 
+if record.requiere_revision_manual:
+    st.warning(record.motivo_revision or "Esta factura requiere revision manual.")
+
 col1, col2, col3 = st.columns(3)
 col1.metric("Subtotal", format_amount(record.subtotal))
 col2.metric("IVA", format_amount(record.iva))
@@ -53,6 +56,7 @@ with info_col1:
     render_detail_field("Archivo", record.archivo)
     render_detail_field("Ruta", record.ruta_archivo)
     render_detail_field("Parser usado", record.parser_usado)
+    render_detail_field("Extractor origen", record.extractor_origen)
     render_detail_field("Numero de factura", record.numero_factura)
     render_detail_field("Fecha de factura", record.fecha_factura)
 
@@ -61,6 +65,8 @@ with info_col2:
     render_detail_field("Cliente", record.nombre_cliente)
     render_detail_field("NIF cliente", record.nif_cliente)
     render_detail_field("CP cliente", record.cp_cliente)
+    render_detail_field("Requiere revision", format_bool_badge(record.requiere_revision_manual))
+    render_detail_field("Motivo revision", record.motivo_revision)
     render_detail_field("Creado", record.created_at)
     render_detail_field("Actualizado", record.updated_at)
 
