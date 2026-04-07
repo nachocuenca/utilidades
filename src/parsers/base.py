@@ -8,10 +8,28 @@ from pathlib import Path
 from src.pdf.text_cleaner import split_clean_lines
 from src.utils.amounts import calculate_missing_amounts, parse_amount
 from src.utils.dates import extract_date_candidates, normalize_date
-from src.utils.ids import extract_postal_codes, extract_tax_ids, normalize_postal_code, normalize_tax_id
+from src.utils.ids import extract_postal_codes, normalize_postal_code, normalize_tax_id
 from src.utils.names import clean_name_candidate, is_valid_name_candidate, pick_best_name
 
 AMOUNT_CAPTURE_PATTERN = r"([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{1,4})?)"
+EXACT_TAX_ID_PATTERN = re.compile(
+    r"(?<![A-Z0-9])(?:ES)?([A-Z]\d{8}|\d{8}[A-Z]|[XYZ]\d{7}[A-Z])(?![A-Z0-9])",
+    re.IGNORECASE,
+)
+INVALID_INVOICE_NUMBER_VALUES = {
+    "",
+    "de",
+    "del",
+    "no",
+    "n",
+    "fecha",
+    "contiene",
+    "cliente",
+    "factura",
+    "numero",
+    "número",
+    "hoja",
+}
 
 
 @dataclass(slots=True)
@@ -39,6 +57,7 @@ class ParsedInvoiceData:
         self.nif_cliente = normalize_tax_id(self.nif_cliente)
         self.cp_cliente = normalize_postal_code(self.cp_cliente)
         self.fecha_factura = normalize_date(self.fecha_factura)
+        self.numero_factura = BaseInvoiceParser.clean_invoice_number_candidate(self.numero_factura)
 
         self.subtotal, self.iva, self.total = calculate_missing_amounts(
             self.subtotal,
@@ -103,6 +122,44 @@ class BaseInvoiceParser(ABC):
         parent_name = re.sub(r"\s+", " ", parent_name).strip()
         return clean_name_candidate(parent_name)
 
+    @staticmethod
+    def clean_invoice_number_candidate(value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        cleaned = str(value).strip(" .,:;#/-")
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        if cleaned == "":
+            return None
+
+        if cleaned.lower() in INVALID_INVOICE_NUMBER_VALUES:
+            return None
+
+        if len(cleaned) <= 2 and cleaned.lower() not in {"f1", "f2"}:
+            return None
+
+        if cleaned.lower().startswith("fecha"):
+            return None
+
+        return cleaned
+
+    def extract_exact_tax_ids(self, text: str) -> list[str]:
+        raw_candidates = EXACT_TAX_ID_PATTERN.findall(text.upper())
+        normalized: list[str] = []
+        seen: set[str] = set()
+
+        for item in raw_candidates:
+            candidate = normalize_tax_id(item)
+            if not candidate:
+                continue
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            normalized.append(candidate)
+
+        return normalized
+
     def extract_date(self, text: str) -> str | None:
         label_patterns = [
             r"fecha\s+factura",
@@ -138,7 +195,53 @@ class BaseInvoiceParser(ABC):
             if not match:
                 continue
 
-            candidate = match.group(1).strip(" .,:;")
+            candidate = self.clean_invoice_number_candidate(match.group(1))
+            if candidate:
+                return candidate
+
+        return None
+
+    def extract_filename_invoice_number(
+        self,
+        file_path: str | Path,
+        patterns: list[str],
+    ) -> str | None:
+        stem = Path(file_path).stem
+
+        for pattern_text in patterns:
+            match = re.search(pattern_text, stem, re.IGNORECASE)
+            if not match:
+                continue
+
+            candidate = self.clean_invoice_number_candidate(match.group(1))
+            if candidate:
+                return candidate
+
+        return None
+
+    def extract_filename_date(
+        self,
+        file_path: str | Path,
+        patterns: list[str] | None = None,
+    ) -> str | None:
+        stem = Path(file_path).stem
+
+        search_patterns = patterns or [
+            r"(20\d{2}[01]\d[0-3]\d)",
+            r"([0-3]\d[_\-][01]\d[_\-]20\d{2})",
+            r"(20\d{2}[_\-][01]\d[_\-][0-3]\d)",
+        ]
+
+        for pattern_text in search_patterns:
+            match = re.search(pattern_text, stem)
+            if not match:
+                continue
+
+            raw_value = match.group(1).replace("_", "-")
+            if re.fullmatch(r"20\d{2}[01]\d[0-3]\d", raw_value):
+                raw_value = f"{raw_value[6:8]}-{raw_value[4:6]}-{raw_value[0:4]}"
+
+            candidate = normalize_date(raw_value)
             if candidate:
                 return candidate
 
@@ -175,9 +278,9 @@ class BaseInvoiceParser(ABC):
         return self.extract_labeled_amount(
             text,
             [
-                r"\biva\b",
                 r"cuota\s+iva",
-                r"impuestos?",
+                r"importe\s+iva",
+                r"\biva\b",
             ],
         )
 
@@ -185,9 +288,9 @@ class BaseInvoiceParser(ABC):
         return self.extract_labeled_amount(
             text,
             [
-                r"total",
                 r"importe\s+total",
                 r"total\s+factura",
+                r"\btotal\b",
             ],
         )
 
@@ -202,17 +305,22 @@ class BaseInvoiceParser(ABC):
             if not match:
                 continue
 
-            candidate = normalize_tax_id(match.group(1))
+            line_fragment = match.group(1)
+            candidates = self.extract_exact_tax_ids(line_fragment)
+            if candidates:
+                return candidates[0]
+
+            candidate = normalize_tax_id(line_fragment)
             if candidate:
                 return candidate
 
-        candidates = extract_tax_ids(text)
+        candidates = self.extract_exact_tax_ids(text)
         return candidates[0] if candidates else None
 
     def extract_supplier_tax_id(self, text: str) -> str | None:
         label_patterns = [
             r"(?:cif|nif)\s*(?:proveedor|emisor|empresa|raz[oó]n\s+social)?\s*[:\-]?\s*([^\n\r]+)",
-            r"(?:proveedor|emisor|empresa|raz[oó]n\s+social)\s*[:\-]?\s*[^\n\r]{0,80}?(?:cif|nif)\s*[:\-]?\s*([A-Z0-9\-\s\.]+)",
+            r"(?:proveedor|emisor|empresa|raz[oó]n\s+social)\s*[:\-]?\s*([^\n\r]{0,120})",
         ]
 
         for pattern_text in label_patterns:
@@ -220,12 +328,18 @@ class BaseInvoiceParser(ABC):
             if not match:
                 continue
 
-            candidate = normalize_tax_id(match.group(1))
-            if candidate:
-                return candidate
+            line_fragment = match.group(1)
+            candidates = self.extract_exact_tax_ids(line_fragment)
+            if candidates:
+                return candidates[0]
 
-        candidates = extract_tax_ids(text)
-        return candidates[0] if candidates else None
+        top_text = "\n".join(self.extract_lines(text)[:12])
+        top_candidates = self.extract_exact_tax_ids(top_text)
+        if top_candidates:
+            return top_candidates[0]
+
+        all_candidates = self.extract_exact_tax_ids(text)
+        return all_candidates[0] if all_candidates else None
 
     def extract_postal_code_from_text(self, text: str) -> str | None:
         label_patterns = [
@@ -257,11 +371,7 @@ class BaseInvoiceParser(ABC):
             if not any(pattern.search(line) for pattern in compiled_labels):
                 continue
 
-            line_after_label = re.sub(
-                r"^.*?:\s*",
-                "",
-                line,
-            ).strip()
+            line_after_label = re.sub(r"^.*?:\s*", "", line).strip()
 
             if line_after_label and is_valid_name_candidate(line_after_label):
                 candidates.append(line_after_label)
@@ -280,9 +390,24 @@ class BaseInvoiceParser(ABC):
     def extract_provider_from_top(self, lines: list[str], top_n: int = 8) -> str | None:
         candidates: list[str] = []
 
+        ignore_patterns = [
+            re.compile(r"factura", re.IGNORECASE),
+            re.compile(r"cliente", re.IGNORECASE),
+            re.compile(r"fecha", re.IGNORECASE),
+            re.compile(r"hoja", re.IGNORECASE),
+            re.compile(r"www\.", re.IGNORECASE),
+            re.compile(r"^c/", re.IGNORECASE),
+        ]
+
         for line in lines[:top_n]:
             cleaned = clean_name_candidate(line)
-            if cleaned and is_valid_name_candidate(cleaned):
+            if not cleaned:
+                continue
+
+            if any(pattern.search(cleaned) for pattern in ignore_patterns):
+                continue
+
+            if is_valid_name_candidate(cleaned):
                 candidates.append(cleaned)
 
         return pick_best_name(candidates)

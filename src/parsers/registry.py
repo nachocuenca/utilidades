@@ -22,13 +22,13 @@ class ParserRegistry:
         self._register_defaults()
 
     def _register_defaults(self) -> None:
-        self.register(GenericTicketInvoiceParser())
         self.register(ObramatInvoiceParser())
         self.register(SaltokiInvoiceParser())
         self.register(MercaluzInvoiceParser())
         self.register(RepsolInvoiceParser())
         self.register(EseaformsInvoiceParser())
         self.register(EdieuropaInvoiceParser())
+        self.register(GenericTicketInvoiceParser())
         self.register(MariaInvoiceParser())
         self.register(AgusInvoiceParser())
         self.register(GenericSupplierInvoiceParser())
