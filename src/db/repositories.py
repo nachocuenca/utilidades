@@ -59,6 +59,20 @@ class InvoiceRepository:
 
             return int(row["id"])
 
+    def delete_all(self) -> int:
+        with get_connection(self.db_path) as connection:
+            row = connection.execute("SELECT COUNT(*) AS total_registros FROM facturas;").fetchone()
+            total = int(row["total_registros"]) if row is not None else 0
+
+            connection.execute("DELETE FROM facturas;")
+            try:
+                connection.execute("DELETE FROM sqlite_sequence WHERE name = 'facturas';")
+            except Exception:
+                pass
+
+            connection.commit()
+            return total
+
     def get_by_id(self, invoice_id: int) -> InvoiceRecord | None:
         query = """
         SELECT

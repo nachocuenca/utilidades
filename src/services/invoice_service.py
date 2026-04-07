@@ -48,6 +48,9 @@ class InvoiceService:
     def resolve_scan_dir(self, inbox_dir: str | Path | None = None) -> Path:
         return self.scanner.resolve_scan_dir(inbox_dir)
 
+    def clear_all_results(self) -> int:
+        return self.repository.delete_all()
+
     def rescan_inbox(
         self,
         parser_name: str | None = None,

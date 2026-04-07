@@ -17,6 +17,43 @@ def get_invoice_service() -> InvoiceService:
     return InvoiceService()
 
 
+def open_folder_dialog(initial_dir: str | None = None) -> str | None:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+
+        selected = filedialog.askdirectory(
+            initialdir=initial_dir if initial_dir else None,
+            title="Selecciona carpeta de escaneo",
+        )
+
+        root.destroy()
+
+        if not selected:
+            return None
+
+        return str(Path(selected).resolve())
+    except Exception:
+        return None
+
+
+def get_common_scan_dirs(default_inbox_dir: str | Path) -> dict[str, str]:
+    home = Path.home()
+
+    candidates = {
+        "inbox": str(Path(default_inbox_dir).resolve()),
+        "descargas": str((home / "Downloads").resolve()),
+        "escritorio": str((home / "Desktop").resolve()),
+        "documentos": str((home / "Documents").resolve()),
+    }
+
+    return candidates
+
+
 def format_amount(value: object | None) -> str:
     if value is None or value == "":
         return "-"
@@ -41,19 +78,24 @@ def format_bool_badge(value: object | None) -> str:
 
 def build_invoice_option_label(row: Mapping[str, Any]) -> str:
     invoice_id = format_text(row.get("id"))
+    tipo_documento = format_text(row.get("tipo_documento"))
     archivo = format_text(row.get("archivo"))
     proveedor = format_text(row.get("nombre_proveedor"))
-    cliente = format_text(row.get("nombre_cliente"))
     fecha = format_text(row.get("fecha_factura"))
     total = format_amount(row.get("total"))
 
-    return f"ID {invoice_id} | {archivo} | {proveedor} | {cliente} | {fecha} | {total}"
+    return f"ID {invoice_id} | {tipo_documento} | {archivo} | {proveedor} | {fecha} | {total}"
 
 
-def render_summary_metrics(service: InvoiceService, search: str | None = None) -> None:
+def render_summary_metrics(
+    service: InvoiceService,
+    search: str | None = None,
+    tipo_documento: str | None = None,
+) -> None:
     dataframe = service.list_invoices_dataframe(
         search=search,
         visible_only=False,
+        tipo_documento=tipo_documento,
     )
 
     total_facturas = len(dataframe.index)
@@ -67,7 +109,7 @@ def render_summary_metrics(service: InvoiceService, search: str | None = None) -
         total_revision = int(pd.to_numeric(dataframe["requiere_revision_manual"], errors="coerce").fillna(0).sum())
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Facturas", total_facturas)
+    col1.metric("Documentos", total_facturas)
     col2.metric("Suma total", format_amount(total_importe))
     col3.metric("Suma IVA", format_amount(total_iva))
     col4.metric("Revisar", total_revision)
