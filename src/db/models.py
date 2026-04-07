@@ -11,7 +11,9 @@ INVOICE_DB_FIELDS = (
     "extractor_origen",
     "requiere_revision_manual",
     "motivo_revision",
+    "carpeta_origen",
     "nombre_proveedor",
+    "nif_proveedor",
     "nombre_cliente",
     "nif_cliente",
     "cp_cliente",
@@ -33,7 +35,9 @@ class InvoiceUpsertData:
     extractor_origen: str = "unknown"
     requiere_revision_manual: bool = False
     motivo_revision: str | None = None
+    carpeta_origen: str | None = None
     nombre_proveedor: str | None = None
+    nif_proveedor: str | None = None
     nombre_cliente: str | None = None
     nif_cliente: str | None = None
     cp_cliente: str | None = None
@@ -60,7 +64,9 @@ class InvoiceRecord:
     extractor_origen: str
     requiere_revision_manual: bool
     motivo_revision: str | None
+    carpeta_origen: str | None
     nombre_proveedor: str | None
+    nif_proveedor: str | None
     nombre_cliente: str | None
     nif_cliente: str | None
     cp_cliente: str | None
@@ -84,7 +90,9 @@ class InvoiceRecord:
             extractor_origen=row["extractor_origen"],
             requiere_revision_manual=bool(row["requiere_revision_manual"]),
             motivo_revision=row["motivo_revision"],
+            carpeta_origen=row["carpeta_origen"],
             nombre_proveedor=row["nombre_proveedor"],
+            nif_proveedor=row["nif_proveedor"],
             nombre_cliente=row["nombre_cliente"],
             nif_cliente=row["nif_cliente"],
             cp_cliente=row["cp_cliente"],

@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS facturas (
     extractor_origen TEXT NOT NULL DEFAULT 'unknown',
     requiere_revision_manual INTEGER NOT NULL DEFAULT 0,
     motivo_revision TEXT,
+    carpeta_origen TEXT,
     nombre_proveedor TEXT,
+    nif_proveedor TEXT,
     nombre_cliente TEXT,
     nif_cliente TEXT,
     cp_cliente TEXT,
@@ -38,6 +40,10 @@ INDEXES_SQL = (
     """
     CREATE INDEX IF NOT EXISTS idx_facturas_nombre_proveedor
         ON facturas (nombre_proveedor);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_facturas_nif_proveedor
+        ON facturas (nif_proveedor);
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_facturas_nombre_cliente
@@ -63,6 +69,10 @@ INDEXES_SQL = (
     CREATE INDEX IF NOT EXISTS idx_facturas_revision_manual
         ON facturas (requiere_revision_manual);
     """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_facturas_carpeta_origen
+        ON facturas (carpeta_origen);
+    """,
 )
 
 TRIGGER_SQL = """
@@ -81,6 +91,8 @@ REQUIRED_COLUMNS = {
     "extractor_origen": "TEXT NOT NULL DEFAULT 'unknown'",
     "requiere_revision_manual": "INTEGER NOT NULL DEFAULT 0",
     "motivo_revision": "TEXT",
+    "carpeta_origen": "TEXT",
+    "nif_proveedor": "TEXT",
 }
 
 

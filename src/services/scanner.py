@@ -54,6 +54,17 @@ class InvoiceScanner:
 
         return path.resolve()
 
+    def _build_folder_origin(self, pdf_path: Path, scan_dir: Path) -> str | None:
+        try:
+            relative_parent = pdf_path.parent.relative_to(scan_dir)
+        except ValueError:
+            return pdf_path.parent.name or None
+
+        if str(relative_parent) == ".":
+            return None
+
+        return relative_parent.as_posix()
+
     def scan(
         self,
         parser_name: str | None = None,
@@ -84,10 +95,13 @@ class InvoiceScanner:
                     continue
 
                 existed_before = self.repository.exists_by_hash(file_hash)
+                folder_origin = self._build_folder_origin(pdf_path, scan_dir)
+
                 result_info = self._process_file(
                     pdf_path=pdf_path,
                     file_hash=file_hash,
                     parser_name=parser_name,
+                    folder_origin=folder_origin,
                 )
 
                 invoice_id = result_info["invoice_id"]
@@ -129,6 +143,7 @@ class InvoiceScanner:
             pdf_path=path,
             file_hash=file_hash,
             parser_name=parser_name,
+            folder_origin=path.parent.name or None,
         )
         return int(result["invoice_id"])
 
@@ -137,6 +152,7 @@ class InvoiceScanner:
         pdf_path: Path,
         file_hash: str,
         parser_name: str | None = None,
+        folder_origin: str | None = None,
     ) -> dict[str, object]:
         read_result = read_pdf_text(pdf_path)
 
@@ -169,7 +185,9 @@ class InvoiceScanner:
             extractor_origen=read_result.extractor,
             requiere_revision_manual=requires_review,
             motivo_revision=review_reason,
+            carpeta_origen=folder_origin,
             nombre_proveedor=parsed.nombre_proveedor,
+            nif_proveedor=None,
             nombre_cliente=parsed.nombre_cliente,
             nif_cliente=parsed.nif_cliente,
             cp_cliente=parsed.cp_cliente,
