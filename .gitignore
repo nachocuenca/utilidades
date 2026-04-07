@@ -1,0 +1,50 @@
+﻿# Entorno virtual
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# IDE / sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Variables de entorno
+.env
+
+# Base de datos local
+data/app.db
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# PDFs y exportaciones generadas
+data/inbox/*
+!data/inbox/.gitkeep
+
+data/exports/*
+!data/exports/.gitkeep
+
+# Streamlit
+.streamlit/
+
+# Logs
+*.log
