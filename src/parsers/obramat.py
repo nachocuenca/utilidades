@@ -42,6 +42,16 @@ ALTERNATIVE_INVOICE_NUMBER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+RECTIFICATIVE_BREAKDOWN_WITH_IVA_PATTERN = re.compile(
+    r"(?:^|[\n\r])\s*IVA\s+\d{1,2}(?:[.,]\d{2})?%\s+([+-]?\d+(?:[.,]\d+)?)\s+([+-]?\d+(?:[.,]\d+)?)\s+([+-]?\d+(?:[.,]\d+)?)\s*(?:$|[\n\r])",
+    re.IGNORECASE,
+)
+
+RECTIFICATIVE_BREAKDOWN_WITHOUT_IVA_PATTERN = re.compile(
+    r"(?:^|[\n\r])\s*\d{1,2}(?:[.,]\d{2})?\s+([+-]?\d+(?:[.,]\d+)?)\s+([+-]?\d+(?:[.,]\d+)?)\s+([+-]?\d+(?:[.,]\d+)?)\s*(?:$|[\n\r])",
+    re.IGNORECASE,
+)
+
 
 class ObramatInvoiceParser(GenericSupplierInvoiceParser):
     parser_name = "obramat"
@@ -203,6 +213,11 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
             if triplet is not None:
                 return triplet
 
+        if self.is_rectificative_layout(text):
+            triplet = self.extract_rectificative_tax_breakdown(text)
+            if triplet is not None:
+                return triplet
+
         triplet = self.extract_classic_tax_breakdown(text)
         if triplet is not None:
             return triplet
@@ -216,6 +231,28 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
             or "desglose totales" in normalized_text
             or "factura emitida por 018" in normalized_text
         )
+
+    def is_rectificative_layout(self, text: str) -> bool:
+        return "factura rectificativa" in text.lower()
+
+    def extract_rectificative_tax_breakdown(self, text: str) -> tuple[float | None, float | None, float | None] | None:
+        match = RECTIFICATIVE_BREAKDOWN_WITH_IVA_PATTERN.search(text)
+        if match:
+            return (
+                parse_amount(match.group(1)),
+                parse_amount(match.group(2)),
+                parse_amount(match.group(3)),
+            )
+
+        match = RECTIFICATIVE_BREAKDOWN_WITHOUT_IVA_PATTERN.search(text)
+        if match:
+            return (
+                parse_amount(match.group(1)),
+                parse_amount(match.group(2)),
+                parse_amount(match.group(3)),
+            )
+
+        return None
 
     def extract_f0018_tax_breakdown(self, text: str) -> tuple[float | None, float | None, float | None] | None:
         lines = self.extract_lines(text)
@@ -234,10 +271,8 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
                 if "IVA" not in upper_line and "EUR" not in upper_line:
                     continue
 
-                triplet = self._extract_triplet_from_amounts(
-                    self._parse_amounts_from_line(candidate_line),
-                    prefer_tail=True,
-                )
+                amounts = self._parse_amounts_from_line(candidate_line)
+                triplet = self._extract_triplet_from_amounts(amounts, prefer_tail=True)
                 if triplet is not None:
                     return triplet
 
