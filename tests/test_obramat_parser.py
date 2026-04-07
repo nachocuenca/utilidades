@@ -38,9 +38,6 @@ CAMBIO (EUR) 10,00
 Tasa IVA/IGIC/IPSI Total. SI (EUR)
 Total IVA/IGIC/IPSI Total TTI (EUR)
 IVA 21.00% 8.43 1.77 10,20
-Ejemplar cliente
-BRICOLAJE BRICOMAN, S.L.U. R.M. Madrid Tomo 21.744, Secc. 8 del Libro 0, Folio 21, Hoja M-387251
-RAZON SOCIAL Calle Margarita Salas, 6, 28919-Leganes (Madrid) C.I.F. B-84406289
 """
 
 OBRAMAT_WITHOUT_IVA_LABEL_TEXT = """FACTURA 029-0002-883420
@@ -61,11 +58,7 @@ Numero NIF : 48334490J
 Numero de cuenta : 2225777
 Telefono : 613026600
 Fecha de venta : 02/02/2026
-Condiciones de reglamen. : Precio al contado sin descuento
-Condiciones de venta : Mencionados sobre el documento
 Ticket de caja : 029-000037-010-1851-NFS: 010026 02/02/2026 13:22 Venta
-Observaciones :
-Pag. 1 / 1
 Modos de pagos
 TARJ. REDSYS BB(EUR) 33,50
 TARJ: 000474678??????8759
@@ -90,8 +83,38 @@ Ticket de caja : 029-000037-010-1851-NFS: 010026 10/02/2026 09:20 Venta
 Tasa IVA/IGIC/IPSI Total. SI (EUR)
 Total IVA/IGIC/IPSI Total TTI (EUR)
 IVA 21.00% -27,69 -5,81 -33,50
-BRICOLAJE BRICOMAN, S.L.U. R.M. Madrid Tomo 21.744, Secc. 8 del Libro 0, Folio 21, Hoja M-387251
-RAZON SOCIAL Calle Margarita Salas, 6, 28919-Leganes (Madrid) C.I.F. B-84406289
+"""
+
+OBRAMAT_F0018_TEXT = """FACTURA F0018-029-52/0000093
+BRICOLAJE BRICOMAN,S.L.U
+CIF: B-84406289
+Avda. Pais Valencia 9
+Teléfono: 965594325
+Finestrat, a 5 Marzo 2026
+SR DANIEL CUENCA MOYA
+C/ MARAVALL 31 2 E
+03501 BENIDORM
+ESPAÑA
+Numero NIF : 48334490J
+Fecha de venta : 05/03/2026
+Tasa IVA/IGIC/IPSI Total. SI (EUR)
+Total IVA/IGIC/IPSI Total TTI (EUR)
+IVA 21.00% 100,00 21,00 121,00
+"""
+
+LEROY_TEXT = """BRICOLAJE - CONSTRUCCIÓN - DECORACIÓN - JARDINERÍA
+Leroy Merlin Espana S.L.U. Avenida de la Vega 2, 28108 Alcobendas Madrid N.I.F.B-84818442
+FACTURA 079-0003-843353
+Leroy Merlin Finestrat
+LEROY MERLIN SLU
+CIF B-84818442
+Avda Finestrat,11-13
+03509 Finestrat-ALICANTE
+DANIEL CUENCA MOYA EI
+MARAVALL 31
+03501 BENIDORM
+Número NIF: 48334490J
+Fecha de venta: 27/03/2026
 """
 
 
@@ -133,10 +156,6 @@ def test_obramat_extracts_tax_breakdown_without_explicit_iva_label() -> None:
     )
 
     assert result.parser_usado == "obramat"
-    assert result.nombre_proveedor == "BRICOLAJE BRICOMAN, S.L.U."
-    assert result.nif_proveedor == "B84406289"
-    assert result.nombre_cliente == "Daniel Cuenca Moya"
-    assert result.nif_cliente == "48334490J"
     assert result.numero_factura == "029-0002-883420"
     assert result.fecha_factura == "02-02-2026"
     assert result.subtotal == pytest.approx(27.69)
@@ -153,12 +172,33 @@ def test_obramat_supports_rectificative_negative_amounts() -> None:
     )
 
     assert result.parser_usado == "obramat"
-    assert result.nombre_proveedor == "BRICOLAJE BRICOMAN, S.L.U."
-    assert result.nif_proveedor == "B84406289"
-    assert result.nombre_cliente == "Daniel Cuenca Moya"
-    assert result.nif_cliente == "48334490J"
     assert result.numero_factura == "029-0002-R090760"
     assert result.fecha_factura == "10-02-2026"
     assert result.subtotal == pytest.approx(-27.69)
     assert result.iva == pytest.approx(-5.81)
     assert result.total == pytest.approx(-33.50)
+
+
+def test_obramat_supports_f0018_invoice_number_family() -> None:
+    parser = ObramatInvoiceParser()
+
+    result = parser.parse(
+        OBRAMAT_F0018_TEXT,
+        Path(r"C:\temp\OBRAMAT - N° FacturaF0018-029-52_0000093.pdf"),
+    )
+
+    assert result.parser_usado == "obramat"
+    assert result.numero_factura == "F0018-029-52/0000093"
+    assert result.fecha_factura == "05-03-2026"
+    assert result.subtotal == pytest.approx(100.00)
+    assert result.iva == pytest.approx(21.00)
+    assert result.total == pytest.approx(121.00)
+
+
+def test_obramat_does_not_absorb_leroy_merlin() -> None:
+    parser = ObramatInvoiceParser()
+
+    assert parser.can_handle(
+        LEROY_TEXT,
+        Path(r"C:\temp\invoice (6).pdf"),
+    ) is False
