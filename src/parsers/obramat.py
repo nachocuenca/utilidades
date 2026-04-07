@@ -6,6 +6,7 @@ from pathlib import Path
 from src.parsers.base import ParsedInvoiceData
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 from src.utils.amounts import parse_amount
+from src.utils.dates import normalize_date
 
 AMOUNT_TOKEN_PATTERN = re.compile(
     r"[+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{1,4})?"
@@ -17,12 +18,17 @@ SUPPLIER_TAX_ID_PATTERN = re.compile(
 )
 
 CUSTOMER_TAX_ID_PATTERN = re.compile(
-    r"Numero\s+NIF\s*:\s*([A-Z0-9][A-Z0-9\-\s]+)",
+    r"(?:Numero\s+NIF|NIF)\s*:\s*([A-Z0-9][A-Z0-9\-\s]+)",
     re.IGNORECASE,
 )
 
 SALE_DATE_PATTERN = re.compile(
     r"Fecha\s+de\s+venta\s*:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})",
+    re.IGNORECASE,
+)
+
+RETURN_DATE_PATTERN = re.compile(
+    r"Fecha\s+de\s+devoluci[oó]n\s*:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})",
     re.IGNORECASE,
 )
 
@@ -61,14 +67,23 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
         if any(token in normalized_text for token in ("bricoman", "obramat", "bricolaje bricoman")):
             score += 3
 
+        if "obramat finestrat" in normalized_text:
+            score += 2
+
         if "avda. pais valencia" in normalized_text or "avda pais valencia" in normalized_text:
             score += 2
 
-        if "fecha de venta" in normalized_text:
+        if "avinguda país valencià" in normalized_text or "avinguda pais valencia" in normalized_text:
+            score += 2
+
+        if "fecha de venta" in normalized_text or "fecha de devolucion" in normalized_text:
             score += 1
 
         if "ticket de caja" in normalized_text:
             score += 1
+
+        if "desglose totales" in normalized_text:
+            score += 2
 
         if "tasa iva/igic/ipsi" in normalized_text:
             score += 1
@@ -123,7 +138,7 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
 
     def extract_obramat_customer_name(self, text: str) -> str:
         normalized_text = re.sub(r"\s+", " ", text).upper()
-        if all(token in normalized_text for token in ("DANIEL", "CUENCA", "MOYA")):
+        if "DANIEL" in normalized_text and "CUENCA" in normalized_text:
             return self.DEFAULT_CUSTOMER_NAME
         return self.DEFAULT_CUSTOMER_NAME
 
@@ -148,7 +163,8 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
 
         text_match = ALTERNATIVE_INVOICE_NUMBER_PATTERN.search(text)
         if text_match:
-            return self.clean_invoice_number_candidate(text_match.group(1))
+            raw_value = text_match.group(1).replace("_", "/")
+            return self.clean_invoice_number_candidate(raw_value)
 
         from_filename = self.extract_filename_invoice_number(
             file_path,
@@ -162,31 +178,75 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
             ],
         )
         if from_filename:
-            return self.clean_invoice_number_candidate(from_filename)
+            return self.clean_invoice_number_candidate(from_filename.replace("_", "/"))
 
         return None
 
     def extract_obramat_date(self, file_path: str | Path, text: str) -> str | None:
+        match = RETURN_DATE_PATTERN.search(text)
+        if match:
+            return match.group(1)
+
         match = SALE_DATE_PATTERN.search(text)
         if match:
             return match.group(1)
 
+        top_text = "\n".join(self.extract_lines(text)[:8])
+        top_date = normalize_date(top_text)
+        if top_date:
+            return top_date
+
         return self.extract_filename_date(file_path) or self.extract_date(text)
 
     def extract_obramat_tax_breakdown(self, text: str) -> tuple[float | None, float | None, float | None]:
-        for block in self._get_breakdown_candidate_blocks(text):
+        if self.is_f0018_layout(text):
+            triplet = self.extract_f0018_tax_breakdown(text)
+            if triplet is not None:
+                return triplet
+
+        for block in self._get_classic_breakdown_candidate_blocks(text):
             for line in reversed(block):
-                triplet = self._extract_breakdown_triplet_from_line(line)
+                triplet = self._extract_triplet_from_breakdown_line(line)
                 if triplet is not None:
                     return triplet
 
         return (None, None, None)
+
+    def is_f0018_layout(self, text: str) -> bool:
+        normalized_text = text.lower()
+        return (
+            "factura f0018-" in normalized_text
+            or "desglose totales" in normalized_text
+            or "factura emitida por 018" in normalized_text
+        )
+
+    def extract_f0018_tax_breakdown(self, text: str) -> tuple[float | None, float | None, float | None] | None:
+        lines = self.extract_lines(text)
+
+        for index, line in enumerate(lines):
+            if "DESGLOSE TOTALES" not in line.upper():
+                continue
+
+            candidate_lines = lines[index + 1 : index + 8]
+            for candidate_line in candidate_lines:
+                upper_line = candidate_line.upper()
+                if "TOTAL BI" in upper_line or "TOTAL IVA" in upper_line:
+                    continue
+                if "IVA" not in upper_line and "EUR" not in upper_line:
+                    continue
+
+                triplet = self._extract_triplet_from_breakdown_line(candidate_line)
+                if triplet is not None:
+                    return triplet
+
+        return None
 
     def extract_obramat_subtotal_fallback(self, text: str) -> float | None:
         return self.extract_labeled_amount(
             text,
             [
                 r"base\s+imponible",
+                r"total\s+bi",
                 r"total\.\s*si",
             ],
         )
@@ -197,6 +257,7 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
             [
                 r"cuota\s+iva",
                 r"importe\s+iva",
+                r"total\s+iva",
                 r"total\s+iva/igic/ipsi",
             ],
         )
@@ -208,10 +269,11 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
                 r"total\s+tti",
                 r"importe\s+tti",
                 r"total\s+factura",
+                r"\btotal\b",
             ],
         )
 
-    def _get_breakdown_candidate_blocks(self, text: str) -> list[list[str]]:
+    def _get_classic_breakdown_candidate_blocks(self, text: str) -> list[list[str]]:
         lines = self.extract_lines(text)
         lower_lines = [line.lower() for line in lines]
 
@@ -232,11 +294,14 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
 
         return blocks
 
-    def _extract_breakdown_triplet_from_line(
+    def _extract_triplet_from_breakdown_line(
         self,
         line: str,
     ) -> tuple[float | None, float | None, float | None] | None:
         normalized_line = re.sub(r"\s+", " ", line).strip()
+        if normalized_line == "":
+            return None
+
         lowered = normalized_line.lower()
 
         ignored_markers = (
@@ -249,6 +314,10 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
             "importe tti",
             "designacion",
             "referencia articulo",
+            "método de pago",
+            "metodo de pago",
+            "pagos realizados",
+            "gracias por tu visita",
         )
         if any(marker in lowered for marker in ignored_markers):
             return None
@@ -257,19 +326,17 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
         if len(raw_amounts) < 3:
             return None
 
-        candidate_amounts = raw_amounts[-3:]
-        parsed_values = [parse_amount(value) for value in candidate_amounts]
-        if any(value is None for value in parsed_values):
+        parsed_values = [parse_amount(value) for value in raw_amounts]
+        parsed_values = [value for value in parsed_values if value is not None]
+        if len(parsed_values) < 3:
             return None
 
-        subtotal = parsed_values[0]
-        iva = parsed_values[1]
-        total = parsed_values[2]
+        for start_index in range(len(parsed_values) - 3, -1, -1):
+            subtotal = parsed_values[start_index]
+            iva = parsed_values[start_index + 1]
+            total = parsed_values[start_index + 2]
 
-        if subtotal is None or iva is None or total is None:
-            return None
+            if round(subtotal + iva - total, 2) == 0:
+                return subtotal, iva, total
 
-        if round(subtotal + iva - total, 2) != 0:
-            return None
-
-        return subtotal, iva, total
+        return None
