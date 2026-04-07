@@ -66,6 +66,9 @@ class Settings:
     ocr_render_dpi: int
     ocr_min_text_length: int
     ocr_tesseract_cmd: str
+    force_default_customer_for_facturas: bool
+    default_customer_name: str
+    default_customer_tax_id: str
 
 
 def ensure_runtime_directories(settings: Settings) -> None:
@@ -95,6 +98,12 @@ def get_settings() -> Settings:
         ocr_render_dpi=_get_int_env("OCR_RENDER_DPI", 200),
         ocr_min_text_length=_get_int_env("OCR_MIN_TEXT_LENGTH", 30),
         ocr_tesseract_cmd=_get_env("OCR_TESSERACT_CMD", ""),
+        force_default_customer_for_facturas=_get_bool_env(
+            "FORCE_DEFAULT_CUSTOMER_FOR_FACTURAS",
+            False,
+        ),
+        default_customer_name=_get_env("DEFAULT_CUSTOMER_NAME", ""),
+        default_customer_tax_id=_get_env("DEFAULT_CUSTOMER_TAX_ID", ""),
     )
 
     ensure_runtime_directories(settings)

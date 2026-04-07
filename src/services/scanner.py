@@ -74,6 +74,33 @@ class InvoiceScanner:
 
         return "factura"
 
+    def _apply_default_customer_context(
+        self,
+        upsert_data: InvoiceUpsertData,
+        document_type: str,
+        folder_origin: str | None,
+    ) -> None:
+        if document_type != "factura":
+            return
+
+        if not self.settings.force_default_customer_for_facturas:
+            return
+
+        # Solo aplicamos este contexto en escaneos por subcarpetas reales
+        # (caso Dani por proveedor). No debe afectar a facturas genéricas
+        # en la raíz ni a tests unitarios con PDFs sueltos.
+        if folder_origin is None or str(folder_origin).strip() == "":
+            return
+
+        default_name = self.settings.default_customer_name.strip()
+        default_tax_id = self.settings.default_customer_tax_id.strip()
+
+        if default_name:
+            upsert_data.nombre_cliente = default_name
+
+        if default_tax_id:
+            upsert_data.nif_cliente = default_tax_id
+
     def scan(
         self,
         parser_name: str | None = None,
@@ -213,6 +240,12 @@ class InvoiceScanner:
             iva=parsed.iva,
             total=parsed.total,
             texto_crudo=parsed.texto_crudo,
+        )
+
+        self._apply_default_customer_context(
+            upsert_data=upsert_data,
+            document_type=document_type,
+            folder_origin=folder_origin,
         )
 
         invoice_id = self.repository.upsert(upsert_data)

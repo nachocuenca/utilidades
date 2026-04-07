@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 
 from src.parsers.base import BaseInvoiceParser, ParsedInvoiceData
 
@@ -14,7 +13,7 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
         path_hint = self.get_folder_hint_name(file_path)
         normalized_text = text.lower()
 
-        if path_hint and path_hint.lower() not in {"inbox", "data"}:
+        if path_hint and path_hint.lower() not in {"inbox", "data", "tickets"}:
             if any(token in normalized_text for token in ("factura", "base imponible", "iva", "total")):
                 return True
 
@@ -24,6 +23,8 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
             "razón social",
             "razon social",
             "base imponible",
+            "nº factura",
+            "número de factura",
         )
         return any(marker in normalized_text for marker in supplier_markers)
 
@@ -38,12 +39,6 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
         result.subtotal = self.extract_subtotal(text)
         result.iva = self.extract_iva(text)
         result.total = self.extract_total(text)
-
-        if result.nombre_cliente is None and result.nombre_proveedor:
-            result.nombre_cliente = result.nombre_proveedor
-
-        if result.nif_cliente is None and result.nif_proveedor:
-            result.nif_cliente = result.nif_proveedor
 
         return result.finalize()
 
