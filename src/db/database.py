@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS facturas (
     archivo TEXT NOT NULL,
     ruta_archivo TEXT NOT NULL,
     hash_archivo TEXT NOT NULL UNIQUE,
+    tipo_documento TEXT NOT NULL DEFAULT 'factura',
     parser_usado TEXT NOT NULL DEFAULT 'generic',
     extractor_origen TEXT NOT NULL DEFAULT 'unknown',
     requiere_revision_manual INTEGER NOT NULL DEFAULT 0,
@@ -36,6 +37,10 @@ INDEXES_SQL = (
     """
     CREATE INDEX IF NOT EXISTS idx_facturas_archivo
         ON facturas (archivo);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_facturas_tipo_documento
+        ON facturas (tipo_documento);
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_facturas_nombre_proveedor
@@ -88,6 +93,7 @@ END;
 """
 
 REQUIRED_COLUMNS = {
+    "tipo_documento": "TEXT NOT NULL DEFAULT 'factura'",
     "extractor_origen": "TEXT NOT NULL DEFAULT 'unknown'",
     "requiere_revision_manual": "INTEGER NOT NULL DEFAULT 0",
     "motivo_revision": "TEXT",

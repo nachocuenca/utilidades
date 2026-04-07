@@ -12,6 +12,7 @@ from src.services.scanner import InvoiceScanner, ScanSummary
 
 VISIBLE_TABLE_COLUMNS = [
     "id",
+    "tipo_documento",
     "archivo",
     "carpeta_origen",
     "parser_usado",
@@ -77,18 +78,26 @@ class InvoiceService:
         limit: int | None = None,
         offset: int = 0,
         only_manual_review: bool | None = None,
+        tipo_documento: str | None = None,
     ) -> list[InvoiceRecord]:
         return self.repository.list_invoices(
             search=search,
             limit=limit,
             offset=offset,
             only_manual_review=only_manual_review,
+            tipo_documento=tipo_documento,
         )
 
-    def count_invoices(self, search: str | None = None, only_manual_review: bool | None = None) -> int:
+    def count_invoices(
+        self,
+        search: str | None = None,
+        only_manual_review: bool | None = None,
+        tipo_documento: str | None = None,
+    ) -> int:
         return self.repository.count(
             search=search,
             only_manual_review=only_manual_review,
+            tipo_documento=tipo_documento,
         )
 
     def get_invoice(self, invoice_id: int) -> InvoiceRecord | None:
@@ -107,12 +116,14 @@ class InvoiceService:
         offset: int = 0,
         visible_only: bool = True,
         only_manual_review: bool | None = None,
+        tipo_documento: str | None = None,
     ) -> pd.DataFrame:
         records = self.list_invoices(
             search=search,
             limit=limit,
             offset=offset,
             only_manual_review=only_manual_review,
+            tipo_documento=tipo_documento,
         )
 
         rows: list[dict[str, object | None]] = []
@@ -123,6 +134,7 @@ class InvoiceService:
                     "archivo": record.archivo,
                     "ruta_archivo": record.ruta_archivo,
                     "hash_archivo": record.hash_archivo,
+                    "tipo_documento": record.tipo_documento,
                     "parser_usado": record.parser_usado,
                     "extractor_origen": record.extractor_origen,
                     "requiere_revision_manual": record.requiere_revision_manual,
@@ -151,6 +163,7 @@ class InvoiceService:
             "archivo",
             "ruta_archivo",
             "hash_archivo",
+            "tipo_documento",
             "parser_usado",
             "extractor_origen",
             "requiere_revision_manual",
@@ -191,6 +204,7 @@ class InvoiceService:
             "archivo": record.archivo,
             "ruta_archivo": record.ruta_archivo,
             "hash_archivo": record.hash_archivo,
+            "tipo_documento": record.tipo_documento,
             "parser_usado": record.parser_usado,
             "extractor_origen": record.extractor_origen,
             "requiere_revision_manual": record.requiere_revision_manual,

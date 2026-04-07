@@ -13,6 +13,7 @@ EXPORT_COLUMNS = [
     "archivo",
     "ruta_archivo",
     "hash_archivo",
+    "tipo_documento",
     "parser_usado",
     "extractor_origen",
     "requiere_revision_manual",

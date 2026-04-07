@@ -7,6 +7,7 @@ INVOICE_DB_FIELDS = (
     "archivo",
     "ruta_archivo",
     "hash_archivo",
+    "tipo_documento",
     "parser_usado",
     "extractor_origen",
     "requiere_revision_manual",
@@ -31,6 +32,7 @@ class InvoiceUpsertData:
     archivo: str
     ruta_archivo: str
     hash_archivo: str
+    tipo_documento: str = "factura"
     parser_usado: str = "generic"
     extractor_origen: str = "unknown"
     requiere_revision_manual: bool = False
@@ -60,6 +62,7 @@ class InvoiceRecord:
     archivo: str
     ruta_archivo: str
     hash_archivo: str
+    tipo_documento: str
     parser_usado: str
     extractor_origen: str
     requiere_revision_manual: bool
@@ -86,6 +89,7 @@ class InvoiceRecord:
             archivo=row["archivo"],
             ruta_archivo=row["ruta_archivo"],
             hash_archivo=row["hash_archivo"],
+            tipo_documento=row["tipo_documento"],
             parser_usado=row["parser_usado"],
             extractor_origen=row["extractor_origen"],
             requiere_revision_manual=bool(row["requiere_revision_manual"]),

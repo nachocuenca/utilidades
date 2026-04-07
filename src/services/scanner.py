@@ -65,6 +65,15 @@ class InvoiceScanner:
 
         return relative_parent.as_posix()
 
+    def _infer_document_type(self, pdf_path: Path, folder_origin: str | None) -> str:
+        path_text = str(pdf_path).replace("\\", "/").lower()
+        folder_text = (folder_origin or "").lower()
+
+        if "/tickets/" in path_text or folder_text == "tickets" or folder_text.startswith("tickets/"):
+            return "ticket"
+
+        return "factura"
+
     def scan(
         self,
         parser_name: str | None = None,
@@ -96,12 +105,14 @@ class InvoiceScanner:
 
                 existed_before = self.repository.exists_by_hash(file_hash)
                 folder_origin = self._build_folder_origin(pdf_path, scan_dir)
+                document_type = self._infer_document_type(pdf_path, folder_origin)
 
                 result_info = self._process_file(
                     pdf_path=pdf_path,
                     file_hash=file_hash,
                     parser_name=parser_name,
                     folder_origin=folder_origin,
+                    document_type=document_type,
                 )
 
                 invoice_id = result_info["invoice_id"]
@@ -138,12 +149,15 @@ class InvoiceScanner:
     ) -> int:
         path = Path(pdf_path).resolve()
         file_hash = sha256_file(path)
+        folder_origin = path.parent.name or None
+        document_type = self._infer_document_type(path, folder_origin)
 
         result = self._process_file(
             pdf_path=path,
             file_hash=file_hash,
             parser_name=parser_name,
-            folder_origin=path.parent.name or None,
+            folder_origin=folder_origin,
+            document_type=document_type,
         )
         return int(result["invoice_id"])
 
@@ -153,6 +167,7 @@ class InvoiceScanner:
         file_hash: str,
         parser_name: str | None = None,
         folder_origin: str | None = None,
+        document_type: str = "factura",
     ) -> dict[str, object]:
         read_result = read_pdf_text(pdf_path)
 
@@ -181,6 +196,7 @@ class InvoiceScanner:
             archivo=parsed.archivo,
             ruta_archivo=parsed.ruta_archivo,
             hash_archivo=file_hash,
+            tipo_documento=document_type,
             parser_usado=parsed.parser_usado,
             extractor_origen=read_result.extractor,
             requiere_revision_manual=requires_review,

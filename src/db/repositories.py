@@ -7,6 +7,7 @@ from src.db.models import INVOICE_DB_FIELDS, InvoiceRecord, InvoiceUpsertData
 
 SEARCHABLE_COLUMNS = (
     "archivo",
+    "tipo_documento",
     "carpeta_origen",
     "nombre_proveedor",
     "nif_proveedor",
@@ -65,6 +66,7 @@ class InvoiceRepository:
             archivo,
             ruta_archivo,
             hash_archivo,
+            tipo_documento,
             parser_usado,
             extractor_origen,
             requiere_revision_manual,
@@ -102,6 +104,7 @@ class InvoiceRepository:
             archivo,
             ruta_archivo,
             hash_archivo,
+            tipo_documento,
             parser_usado,
             extractor_origen,
             requiere_revision_manual,
@@ -146,10 +149,12 @@ class InvoiceRepository:
         limit: int | None = None,
         offset: int = 0,
         only_manual_review: bool | None = None,
+        tipo_documento: str | None = None,
     ) -> list[InvoiceRecord]:
         where_clause, params = self._build_search_clause(
             search=search,
             only_manual_review=only_manual_review,
+            tipo_documento=tipo_documento,
         )
 
         query = f"""
@@ -158,6 +163,7 @@ class InvoiceRepository:
             archivo,
             ruta_archivo,
             hash_archivo,
+            tipo_documento,
             parser_usado,
             extractor_origen,
             requiere_revision_manual,
@@ -194,10 +200,16 @@ class InvoiceRepository:
 
         return [InvoiceRecord.from_row(row) for row in rows]
 
-    def count(self, search: str | None = None, only_manual_review: bool | None = None) -> int:
+    def count(
+        self,
+        search: str | None = None,
+        only_manual_review: bool | None = None,
+        tipo_documento: str | None = None,
+    ) -> int:
         where_clause, params = self._build_search_clause(
             search=search,
             only_manual_review=only_manual_review,
+            tipo_documento=tipo_documento,
         )
 
         query = f"""
@@ -218,10 +230,12 @@ class InvoiceRepository:
         self,
         search: str | None = None,
         only_manual_review: bool | None = None,
+        tipo_documento: str | None = None,
     ) -> list[dict[str, object | None]]:
         records = self.list_invoices(
             search=search,
             only_manual_review=only_manual_review,
+            tipo_documento=tipo_documento,
         )
 
         export_rows: list[dict[str, object | None]] = []
@@ -241,6 +255,7 @@ class InvoiceRepository:
         self,
         search: str | None,
         only_manual_review: bool | None = None,
+        tipo_documento: str | None = None,
     ) -> tuple[str, list[object]]:
         clauses: list[str] = []
         params: list[object] = []
@@ -254,8 +269,10 @@ class InvoiceRepository:
 
         if only_manual_review is True:
             clauses.append("requiere_revision_manual = 1")
-        elif only_manual_review is False:
-            pass
+
+        if tipo_documento is not None and tipo_documento.strip() != "":
+            clauses.append("tipo_documento = ?")
+            params.append(tipo_documento.strip())
 
         if not clauses:
             return "", []
