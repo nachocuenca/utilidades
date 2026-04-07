@@ -8,6 +8,7 @@ from src.parsers.edieuropa import EdieuropaInvoiceParser
 from src.parsers.eseaforms import EseaformsInvoiceParser
 from src.parsers.generic import GenericInvoiceParser
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
+from src.parsers.generic_ticket import GenericTicketInvoiceParser
 from src.parsers.maria import MariaInvoiceParser
 from src.parsers.mercaluz import MercaluzInvoiceParser
 from src.parsers.obramat import ObramatInvoiceParser
@@ -21,6 +22,7 @@ class ParserRegistry:
         self._register_defaults()
 
     def _register_defaults(self) -> None:
+        self.register(GenericTicketInvoiceParser())
         self.register(ObramatInvoiceParser())
         self.register(SaltokiInvoiceParser())
         self.register(MercaluzInvoiceParser())
