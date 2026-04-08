@@ -43,9 +43,10 @@ def test_mercaluz_abv_layout(mercaluz_abv_text):
     assert result.nif_proveedor == "A03204864"
     assert result.numero_factura == "ABV2024-00789-123456"
     assert result.fecha_factura == "16-10-2024"
-    assert result.subtotal == 112.50
-    assert result.iva == 23.63
-    assert result.total == 136.13
+    assert result.tipo_documento == "abono"
+    assert result.subtotal == -112.50
+    assert result.iva == -23.63
+    assert result.total == -136.13
 
 
 def test_mercaluz_resumen_final_suma_coherente(mercaluz_resumen_text):
@@ -66,4 +67,30 @@ def test_mercaluz_fallback_no_filename(mercaluz_std_text):
     assert result.parser_usado == "mercaluz"
     assert result.numero_factura is not None  # Extrae de texto
     assert result.subtotal == 29.50
+
+
+def test_mercaluz_prefers_coherent_final_block_over_iva_rate() -> None:
+    text = """
+    MERCALUZ SA
+    NIF A03204864
+    FACTURA ABV2024-00001-123456
+    Fecha: 17/10/2024
+
+    BASE IMPONIBLE
+    250,00
+    IVA
+    21,00
+    52,50
+    TOTAL FACTURA
+    302,50
+    """
+
+    parser = resolve_parser(text, file_path=Path("mercaluz/ABV2024-00001-123456.pdf"))
+    result = parser.parse(text, Path("mercaluz/ABV2024-00001-123456.pdf"))
+
+    assert result.parser_usado == "mercaluz"
+    assert result.tipo_documento == "abono"
+    assert result.subtotal == -250.00
+    assert result.iva == -52.50
+    assert result.total == -302.50
 
