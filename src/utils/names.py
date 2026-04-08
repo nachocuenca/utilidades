@@ -16,6 +16,18 @@ TRAILING_NOISE_PATTERN = re.compile(
 
 URL_OR_EMAIL_PATTERN = re.compile(r"(https?://|www\.|@)")
 IBAN_PATTERN = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", re.IGNORECASE)
+NOISE_NAME_PATTERNS = [
+    re.compile(r"\binformaci[oó]n adicional\b", re.IGNORECASE),
+    re.compile(r"\breferencia\b", re.IGNORECASE),
+    re.compile(r"\bnormativa vigente\b", re.IGNORECASE),
+    re.compile(r"\bempresa emisora\b", re.IGNORECASE),
+    re.compile(r"\bcargo\b", re.IGNORECASE),
+    re.compile(r"^BRICOLAJE\s*-\s*CONSTRUCCI[OÓ]N\s*-\s*DECORACI[OÓ]N\s*-\s*JARDINER[ÍI]A$", re.IGNORECASE),
+    re.compile(r"\bde la provincia de alicante\b", re.IGNORECASE),
+    re.compile(r"\bsiempre cerca\b", re.IGNORECASE),
+    re.compile(r"otnemucod", re.IGNORECASE),
+    re.compile(r"n[oó]icpircsn[ií]", re.IGNORECASE),
+]
 
 
 def clean_name_candidate(value: str | None) -> str | None:
@@ -52,6 +64,9 @@ def is_valid_name_candidate(value: str | None) -> bool:
         return False
 
     if normalize_postal_code(cleaned) == cleaned:
+        return False
+
+    if any(pattern.search(cleaned) for pattern in NOISE_NAME_PATTERNS):
         return False
 
     if not any(character.isalpha() for character in cleaned):

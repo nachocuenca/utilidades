@@ -73,10 +73,10 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
         if self._looks_like_leroy_merlin(normalized_text, path_text):
             return False
 
-        if any(token in path_text for token in ("obramat", "bricoman")):
-            return True
-
         score = 0
+
+        if self.matches_file_path_hint(file_path, ("obramat", "bricoman")):
+            score += 1
 
         if any(token in normalized_text for token in ("bricoman", "obramat", "bricolaje bricoman")):
             score += 3
@@ -321,35 +321,51 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
         return None
 
     def extract_classic_tax_breakdown(self, text: str) -> tuple[float | None, float | None, float | None] | None:
-        for block in self._get_classic_breakdown_candidate_blocks(text):
-            for line in reversed(block):
-                normalized_line = re.sub(r"\s+", " ", line).strip()
-                if normalized_line == "":
-                    continue
+        lines = self.extract_lines(text)
 
-                lowered = normalized_line.lower()
-                if any(marker in lowered for marker in self._ignored_breakdown_markers()):
-                    continue
+        for line in reversed(lines):
+            upper_line = line.upper()
 
-                amounts = self._parse_amounts_from_line(normalized_line)
-                if len(amounts) < 3:
-                    continue
+            if "DESGLOSE TOTALES" in upper_line or "MODOS DE PAGOS" in upper_line:
+                continue
 
-                if "iva" in lowered:
-                    triplet = self._extract_triplet_from_amounts(amounts, prefer_tail=True)
-                    if triplet is not None:
-                        return triplet
+            amounts = self._parse_amounts_from_line(line)
+            if len(amounts) < 3:
+                continue
 
-                if len(amounts) >= 4:
-                    triplet = self._extract_triplet_from_amounts(amounts[1:], prefer_tail=False)
-                    if triplet is not None:
-                        return triplet
-
-                triplet = self._extract_triplet_from_amounts(amounts, prefer_tail=True)
-                if triplet is not None:
-                    return triplet
+            triplet = self._extract_triplet_from_amounts(amounts, prefer_tail=True)
+            if triplet is not None:
+                return triplet
 
         return None
+
+    def _extract_triplet_from_amounts(
+        self,
+        amounts: list[float],
+        prefer_tail: bool,
+    ) -> tuple[float | None, float | None, float | None] | None:
+        if len(amounts) < 3:
+            return None
+
+        candidate_amounts = amounts[-3:] if prefer_tail else amounts[:3]
+        subtotal, iva, total = candidate_amounts
+
+        if subtotal is None or iva is None or total is None:
+            return None
+
+        if round(subtotal + iva, 2) != round(total, 2):
+            return None
+
+        return subtotal, iva, total
+
+    def _parse_amounts_from_line(self, line: str) -> list[float]:
+        parsed_values: list[float] = []
+        for raw_amount in AMOUNT_TOKEN_PATTERN.findall(line):
+            parsed = parse_amount(raw_amount)
+            if parsed is None:
+                continue
+            parsed_values.append(parsed)
+        return parsed_values
 
     def extract_obramat_subtotal_fallback(self, text: str) -> float | None:
         return self.extract_labeled_amount(
@@ -357,7 +373,7 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
             [
                 r"base\s+imponible",
                 r"total\s+bi",
-                r"total\.\s*si",
+                r"subtotal",
             ],
         )
 
@@ -368,7 +384,6 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
                 r"cuota\s+iva",
                 r"importe\s+iva",
                 r"total\s+iva",
-                r"total\s+iva/igic/ipsi",
             ],
         )
 
@@ -376,85 +391,8 @@ class ObramatInvoiceParser(GenericSupplierInvoiceParser):
         return self.extract_labeled_amount(
             text,
             [
-                r"total\s+tti",
-                r"importe\s+tti",
                 r"total\s+factura",
-                r"\btotal\b",
+                r"importe\s+total",
+                r"total\s*eur",
             ],
         )
-
-    def _get_classic_breakdown_candidate_blocks(self, text: str) -> list[list[str]]:
-        lines = self.extract_lines(text)
-        lower_lines = [line.lower() for line in lines]
-
-        heading_markers = (
-            "tasa iva/igic/ipsi",
-            "total iva/igic/ipsi",
-            "total tti",
-        )
-
-        blocks: list[list[str]] = []
-
-        for index in range(len(lines) - 1, -1, -1):
-            if any(marker in lower_lines[index] for marker in heading_markers):
-                blocks.append(lines[index : index + 10])
-
-        if lines:
-            blocks.append(lines[max(0, len(lines) - 24) :])
-
-        return blocks
-
-    def _ignored_breakdown_markers(self) -> tuple[str, ...]:
-        return (
-            "modos de pagos",
-            "modos de pago",
-            "efectivo",
-            "cambio",
-            "tarj",
-            "ticket de caja",
-            "precio unidad",
-            "importe tti",
-            "designacion",
-            "referencia articulo",
-            "método de pago",
-            "metodo de pago",
-            "pagos realizados",
-            "gracias por tu visita",
-        )
-
-    def _parse_amounts_from_line(self, line: str) -> list[float]:
-        values: list[float] = []
-
-        for raw_match in AMOUNT_TOKEN_PATTERN.findall(line):
-            parsed = parse_amount(raw_match)
-            if parsed is None:
-                continue
-            values.append(parsed)
-
-        return values
-
-    def _extract_triplet_from_amounts(
-        self,
-        amounts: list[float],
-        prefer_tail: bool,
-    ) -> tuple[float | None, float | None, float | None] | None:
-        if len(amounts) < 3:
-            return None
-
-        if len(amounts) == 3:
-            subtotal, iva, total = amounts
-            if round(subtotal + iva - total, 2) == 0:
-                return subtotal, iva, total
-            return None
-
-        index_range = range(len(amounts) - 3, -1, -1) if prefer_tail else range(0, len(amounts) - 2)
-
-        for start_index in index_range:
-            subtotal = amounts[start_index]
-            iva = amounts[start_index + 1]
-            total = amounts[start_index + 2]
-
-            if round(subtotal + iva - total, 2) == 0:
-                return subtotal, iva, total
-
-        return None

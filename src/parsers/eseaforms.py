@@ -9,20 +9,28 @@ from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 class EseaformsInvoiceParser(GenericSupplierInvoiceParser):
     parser_name = "eseaforms"
     priority = 355
+    SUPPLIER_TAX_ID = "B76080407"
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         normalized_text = text.lower()
+        score = 0
 
         if self.matches_file_path_hint(file_path, ("eseaforms",)):
-            return True
+            score += 1
 
-        return "eseaforms" in normalized_text
+        if "eseaforms" in normalized_text:
+            score += 2
+
+        if self.SUPPLIER_TAX_ID.lower() in normalized_text:
+            score += 2
+
+        return score >= 2
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         result = self.build_result(text, file_path)
 
         result.nombre_proveedor = "ESEAFORMS"
-        result.nif_proveedor = "B76080407"
+        result.nif_proveedor = self.SUPPLIER_TAX_ID
         result.numero_factura = self.extract_filename_invoice_number(
             file_path,
             [

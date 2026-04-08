@@ -35,3 +35,10 @@ def test_name_helpers_reject_tax_ids_as_names() -> None:
     assert clean_name_candidate("Cliente: ACME SL") == "ACME SL"
     assert is_valid_name_candidate("ACME CONSULTING SL") is True
     assert is_valid_name_candidate("B12345678") is False
+
+
+def test_name_helpers_reject_known_heading_noise() -> None:
+    assert is_valid_name_candidate("Información adicional Referencia") is False
+    assert is_valid_name_candidate("En cumplimiento de la normativa vigente es posible que el concepto esté incompleto") is False
+    assert is_valid_name_candidate("BRICOLAJE - CONSTRUCCIÓN - DECORACIÓN - JARDINERÍA") is False
+    assert is_valid_name_candidate(")otnemucod") is False

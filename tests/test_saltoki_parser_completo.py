@@ -156,6 +156,34 @@ TRANSFERENCIA A 30 IBAN..: ES52 0049 1821 0526 1068 2935
 9-02-2026 251,09
 """
 
+SALTOKI_BENIDORM_OCR_FRAGMENT_TEXT = """REF. PROVEEDOR
+F A C T U R A
+CLIENTE FECHA NÚMERO HOJA
+369718 31-01-2026 6475 1
+SALTOKI BENIDORM, S.L.
+CIF: B71406607 CUENCA MOYA, DANIEL
+N.I.F. 48334490J
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+118,04 21 , 0 0 24,79 142,83
+FORMA DE PAGO TOTAL
+TRANSFERENCIA A 30 IBAN..: ES52 0049 1821 0526 1068 2935
+142,83 €
+"""
+
+SALTOKI_BENIDORM_OCR_FRAGMENT_BROKEN_RATE_TEXT = """REF. PROVEEDOR
+F A C T U R A
+CLIENTE FECHA NÚMERO HOJA
+369718 31-01-2026 6475 1
+SALTOKI BENIDORM, S.L.
+CIF: B71406607 CUENCA MOYA, DANIEL
+N.I.F. 48334490J
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+118,04 2 1 , 0 0 24,79 142,83
+FORMA DE PAGO TOTAL
+TRANSFERENCIA A 30 IBAN..: ES52 0049 1821 0526 1068 2935
+142,83 €
+"""
+
 
 def test_saltoki_alicante_extracts_totals_and_header() -> None:
     parser = SaltokiInvoiceParser()
@@ -197,21 +225,6 @@ def test_saltoki_benidorm_extracts_totals_and_header() -> None:
     assert result.total == pytest.approx(251.09)
 
 
-SALTOKI_BENIDORM_OCR_FRAGMENT_TEXT = """REF. PROVEEDOR
-F A C T U R A
-CLIENTE FECHA NÚMERO HOJA
-369718 31-01-2026 6475 1
-SALTOKI BENIDORM, S.L.
-CIF: B71406607 CUENCA MOYA, DANIEL
-N.I.F. 48334490J
-BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
-118,04 21 , 0 0 24,79 142,83
-FORMA DE PAGO TOTAL
-TRANSFERENCIA A 30 IBAN..: ES52 0049 1821 0526 1068 2935
-142,83 €
-"""
-
-
 def test_saltoki_benidorm_ocr_fragment_recovers_base_iva_total() -> None:
     parser = SaltokiInvoiceParser()
 
@@ -232,21 +245,6 @@ def test_saltoki_benidorm_ocr_fragment_recovers_base_iva_total() -> None:
     assert result.total == pytest.approx(142.83)
 
 
-SALTOKI_BENIDORM_OCR_FRAGMENT_BROKEN_RATE_TEXT = """REF. PROVEEDOR
-F A C T U R A
-CLIENTE FECHA NÚMERO HOJA
-369718 31-01-2026 6475 1
-SALTOKI BENIDORM, S.L.
-CIF: B71406607 CUENCA MOYA, DANIEL
-N.I.F. 48334490J
-BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
-118,04 2 1 , 0 0 24,79 142,83
-FORMA DE PAGO TOTAL
-TRANSFERENCIA A 30 IBAN..: ES52 0049 1821 0526 1068 2935
-142,83 €
-"""
-
-
 def test_saltoki_benidorm_ocr_fragment_with_split_rate_recovers_totals() -> None:
     parser = SaltokiInvoiceParser()
 
@@ -260,6 +258,19 @@ def test_saltoki_benidorm_ocr_fragment_with_split_rate_recovers_totals() -> None
     assert result.nif_proveedor == "B71406607"
     assert result.numero_factura == "6475"
     assert result.fecha_factura == "31-01-2026"
+    assert result.subtotal == pytest.approx(118.04)
+    assert result.iva == pytest.approx(24.79)
+    assert result.total == pytest.approx(142.83)
+
+
+def test_saltoki_resumen_block_priorizado() -> None:
+    """Test regla fuerte: bloque resumen final manda si Base + IVA = Total."""
+    with open("tests/fixtures/sample_texts/saltoki_resumen.txt", "r", encoding="utf-8") as f:
+        resumen_text = f.read()
+
+    parser = SaltokiInvoiceParser()
+    result = parser.parse(resumen_text, Path(r"C:\temp\saltoki\resumen_test.pdf"))
+
     assert result.subtotal == pytest.approx(118.04)
     assert result.iva == pytest.approx(24.79)
     assert result.total == pytest.approx(142.83)

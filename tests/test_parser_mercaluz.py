@@ -1,0 +1,69 @@
+from pathlib import Path
+
+import pytest
+from src.parsers.registry import resolve_parser
+from src.parsers.mercaluz import MercaluzInvoiceParser
+
+
+@pytest.fixture
+def mercaluz_std_text():
+    return Path("tests/fixtures/sample_texts/mercaluz_std_ascii.txt").read_text()
+
+
+@pytest.fixture
+def mercaluz_abv_text():
+    return Path("tests/fixtures/sample_texts/mercaluz_abv_ascii.txt").read_text()
+
+
+@pytest.fixture
+def mercaluz_resumen_text():
+    return Path("tests/fixtures/sample_texts/mercaluz_resumen_ascii.txt").read_text()
+
+
+def test_mercaluz_std_layout(mercaluz_std_text):
+    parser = resolve_parser(mercaluz_std_text, file_path=Path("mercaluz/factura_std.pdf"))
+    result = parser.parse(mercaluz_std_text, Path("mercaluz/factura_std.pdf"))
+    
+    assert result.parser_usado == "mercaluz"
+    assert result.nombre_proveedor == "mercaluz"
+    assert result.nif_proveedor == "A03204864"
+    assert result.numero_factura == "FVN2024-00123-456789" or result.numero_factura == "VN2024-00123-456789"
+    assert result.fecha_factura == "15-10-2024"
+    assert result.subtotal == 29.50
+    assert result.iva == 6.20
+    assert result.total == 35.70
+
+
+def test_mercaluz_abv_layout(mercaluz_abv_text):
+    parser = resolve_parser(mercaluz_abv_text, file_path=Path("mercaluz/ABV2024-00789-123456.pdf"))
+    result = parser.parse(mercaluz_abv_text, Path("mercaluz/ABV2024-00789-123456.pdf"))
+    
+    assert result.parser_usado == "mercaluz"
+    assert result.nombre_proveedor == "mercaluz"
+    assert result.nif_proveedor == "A03204864"
+    assert result.numero_factura == "ABV2024-00789-123456"
+    assert result.fecha_factura == "16-10-2024"
+    assert result.subtotal == 112.50
+    assert result.iva == 23.63
+    assert result.total == 136.13
+
+
+def test_mercaluz_resumen_final_suma_coherente(mercaluz_resumen_text):
+    parser = resolve_parser(mercaluz_resumen_text, file_path=Path("mercaluz/resumen.pdf"))
+    result = parser.parse(mercaluz_resumen_text, Path("mercaluz/resumen.pdf"))
+    
+    assert result.parser_usado == "mercaluz"
+    assert result.numero_factura == "FVN2024-01234-567890" or result.numero_factura == "VN2024-01234-567890"  # Ignora ABV anulada
+    assert result.subtotal == 250.00
+    assert result.iva == 52.50
+    assert result.total == 302.50  # Regla fuerte: 250+52.5=302.5
+
+
+def test_mercaluz_fallback_no_filename(mercaluz_std_text):
+    parser = resolve_parser(mercaluz_std_text, file_path=Path("test.pdf"))
+    result = parser.parse(mercaluz_std_text, Path("test.pdf"))
+    
+    assert result.parser_usado == "mercaluz"
+    assert result.numero_factura is not None  # Extrae de texto
+    assert result.subtotal == 29.50
+

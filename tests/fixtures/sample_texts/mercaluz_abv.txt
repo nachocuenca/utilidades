@@ -1,0 +1,21 @@
+MERCALUZ DISTRIBUCION
+NIF A03204864
+Polígono Industrial
+03110 Alicante
+
+FACTURA ABV2024-00789-123456
+Fecha emisión: 16/10/2024
+
+Destinatario:
+NIF B87654321
+
+LÍNEAS:
+Lámpara LED 10W x20   45.00
+Toma corriente x15    67.50
+
+SUBTOTAL               112.50
+IVA (21%)              23.63
+TOTAL                  136.13
+
+Pagado por transferencia
+
