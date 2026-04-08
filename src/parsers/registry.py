@@ -18,6 +18,7 @@ from src.parsers.mercaluz import MercaluzInvoiceParser
 from src.parsers.obramat import ObramatInvoiceParser
 from src.parsers.repsol import RepsolInvoiceParser
 from src.parsers.saltoki import SaltokiInvoiceParser
+from src.parsers.wurth import WurthInvoiceParser
 
 
 @dataclass(slots=True)
@@ -42,6 +43,7 @@ class ParserRegistry:
         self.register(LegalQualityInvoiceParser())
         self.register(MercaluzInvoiceParser())
         self.register(LevantiaInvoiceParser())
+        self.register(WurthInvoiceParser())
 
         # Ticket genérico
         self.register(GenericTicketInvoiceParser())

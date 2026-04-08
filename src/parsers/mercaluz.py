@@ -71,13 +71,14 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
 
         result.numero_factura = self.extract_mercaluz_invoice_number(file_path, text)
         document_kind = self.detect_mercaluz_document_kind(file_path, text, result.numero_factura)
-        result.tipo_documento = "abono" if document_kind == "ABV" else "factura"
+        is_credit_note = self.is_mercaluz_credit_note(text)
+        result.tipo_documento = "abono" if is_credit_note else "factura"
         result.fecha_factura = self.extract_filename_date(file_path) or self.extract_date(text)
 
         subtotal, iva, total = self.extract_mercaluz_amounts(text)
-        result.subtotal = self.apply_mercaluz_document_sign(subtotal, document_kind)
-        result.iva = self.apply_mercaluz_document_sign(iva, document_kind)
-        result.total = self.apply_mercaluz_document_sign(total, document_kind)
+        result.subtotal = self.apply_mercaluz_document_sign(subtotal, is_credit_note)
+        result.iva = self.apply_mercaluz_document_sign(iva, is_credit_note)
+        result.total = self.apply_mercaluz_document_sign(total, is_credit_note)
 
         return result.finalize()
 
@@ -140,6 +141,18 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
             return "ABV"
 
         return "FVN"
+
+    def is_mercaluz_credit_note(self, text: str) -> bool:
+        lowered_text = text.lower()
+        return any(
+            marker in lowered_text
+            for marker in (
+                "abono",
+                "rectificativa",
+                "devolucion",
+                "devolución",
+            )
+        )
 
     def extract_mercaluz_amounts(self, text: str) -> tuple[float | None, float | None, float | None]:
         lines = self.extract_lines(text)
@@ -451,9 +464,9 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
         )
         return best_candidate.value
 
-    def apply_mercaluz_document_sign(self, value: float | None, document_kind: str) -> float | None:
+    def apply_mercaluz_document_sign(self, value: float | None, is_credit_note: bool) -> float | None:
         if value is None:
             return None
-        if document_kind == "ABV":
+        if is_credit_note:
             return -abs(value)
         return abs(value)

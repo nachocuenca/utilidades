@@ -495,27 +495,42 @@ class BaseInvoiceParser(ABC):
         return self._apply_credit_sign(text, value)
 
     def extract_tax_id_from_text(self, text: str) -> str | None:
-        label_patterns = [
-            r"(?:nif|cif|dni|nie)\s*(?:cliente)?\s*[:\-]?\s*([^\n\r]+)",
-            r"(?:vat|tax\s+id)\s*[:\-]?\s*([^\n\r]+)",
+        lines = self.extract_lines(text)
+        inline_label_patterns = [
+            re.compile(r"(?:nif|cif|dni|nie)\s*(?:cliente)?\s*[:\-]?\s*([^\n\r]+)", re.IGNORECASE),
+            re.compile(r"(?:vat|tax\s+id)\s*(?:cliente)?\s*[:\-]?\s*([^\n\r]+)", re.IGNORECASE),
+        ]
+        explicit_customer_patterns = [
+            re.compile(r"(?:nif|cif|dni|nie)\s+cliente\s*[:\-]?\s*([^\n\r]+)", re.IGNORECASE),
+            re.compile(r"(?:vat|tax\s+id)\s+cliente\s*[:\-]?\s*([^\n\r]+)", re.IGNORECASE),
         ]
 
-        for pattern_text in label_patterns:
-            match = re.search(pattern_text, text, re.IGNORECASE)
-            if not match:
+        for index, line in enumerate(lines):
+            if not CUSTOMER_LINE_PATTERN.search(line):
                 continue
 
-            line_fragment = match.group(1)
-            candidates = self.extract_exact_tax_ids(line_fragment)
-            if candidates:
-                return candidates[0]
+            candidate_window = lines[index:index + 3]
+            for candidate_line in candidate_window:
+                candidates = self.extract_exact_tax_ids(candidate_line)
+                if candidates:
+                    return candidates[0]
 
-            candidate = normalize_tax_id(line_fragment)
-            if candidate:
-                return candidate
+                for pattern in inline_label_patterns:
+                    match = pattern.search(candidate_line)
+                    if not match:
+                        continue
 
-        candidates = self.extract_exact_tax_ids(text)
-        return candidates[0] if candidates else None
+                    candidate = normalize_tax_id(match.group(1))
+                    if candidate:
+                        return candidate
+
+        for pattern in explicit_customer_patterns:
+            for match in pattern.finditer(text):
+                candidate = normalize_tax_id(match.group(1))
+                if candidate:
+                    return candidate
+
+        return None
 
     def extract_supplier_tax_id(self, text: str) -> str | None:
         lines = self.extract_lines(text)

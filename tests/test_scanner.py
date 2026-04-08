@@ -99,6 +99,54 @@ def test_scanner_marks_ticket_type_from_resolved_parser_and_skips_default_custom
     assert stored[0].nif_cliente is None
 
 
+def test_scanner_applies_default_customer_over_garbage_for_facturas(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("FORCE_DEFAULT_CUSTOMER_FOR_FACTURAS", "true")
+    monkeypatch.setenv("DEFAULT_CUSTOMER_NAME", "Daniel Cuenca Moya")
+    monkeypatch.setenv("DEFAULT_CUSTOMER_TAX_ID", "48334490J")
+    get_settings.cache_clear()
+
+    inbox_dir = tmp_path / "inbox"
+    supplier_dir = inbox_dir / "proveedor_x"
+    supplier_dir.mkdir(parents=True, exist_ok=True)
+
+    pdf_path = supplier_dir / "factura_cliente_sucio.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake file for tests")
+
+    repository = InvoiceRepository(db_path=tmp_path / "app.db")
+    scanner = InvoiceScanner(repository=repository, inbox_dir=inbox_dir)
+
+    dirty_customer_text = """
+    PROVEEDOR XYZ SL
+    CIF B12345678
+    Cliente: LCUENCAMOYA
+    NIF cliente: ES84 1465 0100 9417 6430 4696
+    Factura: F-2026-001
+    Fecha factura: 08/04/2026
+    Base imponible 100,00
+    IVA 21,00
+    Total factura 121,00
+    """
+
+    def fake_read_pdf_text(path: str | Path) -> PdfReadResult:
+        resolved = Path(path).resolve()
+        return PdfReadResult(
+            file_path=resolved,
+            text=dirty_customer_text,
+            page_count=1,
+            extractor="fake",
+        )
+
+    monkeypatch.setattr("src.services.scanner.read_pdf_text", fake_read_pdf_text)
+
+    scanner.scan(recursive=True)
+
+    stored = repository.list_invoices()
+    assert len(stored) == 1
+    assert stored[0].tipo_documento == "factura"
+    assert stored[0].nombre_cliente == "Daniel Cuenca Moya"
+    assert stored[0].nif_cliente == "48334490J"
+
+
 def test_scanner_process_file_returns_parser_trace_with_matched_parsers(monkeypatch, tmp_path: Path) -> None:
     inbox_dir = tmp_path / "inbox"
     supplier_dir = inbox_dir / "varios"

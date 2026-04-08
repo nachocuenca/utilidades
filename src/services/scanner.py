@@ -11,6 +11,7 @@ from src.pdf.ocr import has_meaningful_text
 from src.pdf.reader import read_pdf_text
 from src.utils.files import list_pdf_files
 from src.utils.hashing import sha256_file
+from src.utils.ids import normalize_tax_id
 
 
 @dataclass(slots=True)
@@ -211,23 +212,36 @@ class InvoiceScanner:
         document_type: str,
         folder_origin: str | None,
     ) -> None:
-        if document_type != "factura":
-            return
-
-        if not self.settings.force_default_customer_for_facturas:
-            return
-
-        if folder_origin is None or str(folder_origin).strip() == "":
+        if not self._should_apply_default_customer_context(
+            document_type=document_type,
+            folder_origin=folder_origin,
+        ):
             return
 
         default_name = self.settings.default_customer_name.strip()
-        default_tax_id = self.settings.default_customer_tax_id.strip()
+        default_tax_id = normalize_tax_id(self.settings.default_customer_tax_id)
 
         if default_name:
             upsert_data.nombre_cliente = default_name
 
         if default_tax_id:
             upsert_data.nif_cliente = default_tax_id
+
+    def _should_apply_default_customer_context(
+        self,
+        document_type: str,
+        folder_origin: str | None,
+    ) -> bool:
+        if document_type != "factura":
+            return False
+
+        if not self.settings.force_default_customer_for_facturas:
+            return False
+
+        if folder_origin is None or str(folder_origin).strip() == "":
+            return False
+
+        return True
 
     def scan(
         self,

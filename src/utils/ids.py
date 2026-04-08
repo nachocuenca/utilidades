@@ -7,6 +7,20 @@ SPANISH_TAX_ID_PATTERN = re.compile(
     r"\b([ABCDEFGHJNPQRSUVWXYZ]?\d{7,8}[A-Z0-9])\b",
     re.IGNORECASE,
 )
+STRUCTURED_SPANISH_TAX_ID_PATTERN = re.compile(
+    r"^(?:\d{8}[A-Z]|[XYZ]\d{7}[A-Z]|[KLM]\d{7}[A-Z]|[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J])$",
+    re.IGNORECASE,
+)
+KNOWN_TAX_ID_PREFIXES = (
+    "CIF",
+    "NIF",
+    "DNI",
+    "NIE",
+    "VAT",
+    "TAXID",
+    "IDFISCAL",
+    "ES",
+)
 
 
 def compact_identifier(value: str | None) -> str | None:
@@ -17,42 +31,47 @@ def compact_identifier(value: str | None) -> str | None:
     return compacted or None
 
 
+def _iter_tax_id_variants(value: str) -> list[str]:
+    variants: list[str] = []
+    seen: set[str] = set()
+    candidate = value
+
+    while candidate and candidate not in seen:
+        seen.add(candidate)
+        variants.append(candidate)
+
+        next_candidate: str | None = None
+        for prefix in KNOWN_TAX_ID_PREFIXES:
+            if candidate.startswith(prefix) and len(candidate) > len(prefix):
+                next_candidate = candidate[len(prefix):]
+                break
+
+        if next_candidate is None:
+            break
+
+        candidate = next_candidate
+
+    return variants
+
+
+def _is_structured_spanish_tax_id(value: str) -> bool:
+    return STRUCTURED_SPANISH_TAX_ID_PATTERN.fullmatch(value) is not None
+
+
 def normalize_tax_id(value: str | None) -> str | None:
     compacted = compact_identifier(value)
     if compacted is None:
         return None
-    return compacted
+
+    for candidate in _iter_tax_id_variants(compacted):
+        if _is_structured_spanish_tax_id(candidate):
+            return candidate
+
+    return None
 
 
 def is_probable_tax_id(value: str | None) -> bool:
-    normalized = normalize_tax_id(value)
-    if normalized is None:
-        return False
-
-    if len(normalized) < 6 or len(normalized) > 16:
-        return False
-
-    if normalized.isdigit():
-        return False
-
-    if normalized.count(" ") > 0:
-        return False
-
-    if re.fullmatch(r"\d{8}[A-Z]", normalized):
-        return True
-
-    if re.fullmatch(r"[XYZ]\d{7}[A-Z]", normalized):
-        return True
-
-    if re.fullmatch(r"[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]", normalized):
-        return True
-
-    if re.fullmatch(r"[A-Z0-9]{6,16}", normalized):
-        has_digit = any(character.isdigit() for character in normalized)
-        has_letter = any(character.isalpha() for character in normalized)
-        return has_digit and has_letter
-
-    return False
+    return normalize_tax_id(value) is not None
 
 
 def extract_tax_ids(text: str) -> list[str]:
