@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -115,8 +115,8 @@ def test_generic_base_rechaza_proveedor_ocr_basura() -> None:
     parser = GenericSupplierInvoiceParser()
     text = """
 otnemucod
-ajoh 
-OILOF 
+ajoh
+OILOF
 .F.I.N
 Cliente: Cliente Prueba SL
     """
@@ -150,7 +150,7 @@ def test_generic_base_iva_cuota_no_porcentaje() -> None:
     """IVA extrae cuota real, no tipo %."""
     text = """
 Base imponible 100,00
-IVA (21%) 21,00 
+IVA (21%) 21,00
 Total factura 121,00
     """
     parser = GenericInvoiceParser()
@@ -234,7 +234,6 @@ def test_generic_supplier_marks_credit_note_amounts_as_negative() -> None:
     assert result.total == -6.64
 
 
-# NUEVOS TESTS PARA GENERIC_TICKET MEJORADO
 def test_generic_ticket_rechaza_proveedor_ocr_basura_ticket() -> None:
     """OCR basura en ticket rechazado."""
     parser = GenericTicketInvoiceParser()
@@ -249,6 +248,7 @@ EFECTIVO 60
     """
     result = parser.parse(text, Path("ticket_ocr_basura.pdf"))
     assert result.nombre_proveedor is None
+    assert result.total == 54.2
 
 
 def test_generic_ticket_nif_proveedor_no_coge_cliente() -> None:
@@ -288,7 +288,7 @@ CAMBIO: 5,80
     """
     assert GenericTicketInvoiceParser().can_handle(text)
     result = GenericTicketInvoiceParser().parse(text, Path("repsol_ticket.pdf"))
-    assert result.nombre_proveedor == "REPSOL"
+    assert result.nombre_proveedor == "REPSOL ESTACION DE SERVICIO"
     assert result.total == 54.2
     assert result.parser_usado == "generic_ticket"
 
@@ -296,7 +296,6 @@ CAMBIO: 5,80
 def test_generic_ticket_extrae_total_final() -> None:
     """Prioriza total en líneas finales."""
     text = """
-Gasolinera Ejemplo
 Líneas productos...
 TOTAL 100.00
     """

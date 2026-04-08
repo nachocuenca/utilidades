@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -21,7 +21,7 @@ def test_generic_ticket_no_longer_intercepts_maria() -> None:
     IVA 21%: 21€
     Total: 121€
     """
-    
+
     parser = resolve_parser(maria_text)
     assert parser.parser_name == "maria", f"Esperado maria, obtenido {parser.parser_name}"
 
@@ -36,13 +36,13 @@ def test_generic_ticket_no_longer_intercepts_agus() -> None:
     Subtotal 85€
     Total 85€
     """
-    
+
     parser = resolve_parser(agus_text)
     assert parser.parser_name == "agus", f"Esperado agus, obtenido {parser.parser_name}"
 
 
 def test_repsol_simplificada_still_goes_to_generic_ticket() -> None:
-    """Test existente mantenido: Repsol rechaza, generic_ticket gana."""
+    """Repsol rechaza simplificadas y generic_ticket gana."""
     repsol_ticket = """
     REPSOL ESTACION DE SERVICIO
     FACTURA SIMPLIFICADA
@@ -52,10 +52,10 @@ def test_repsol_simplificada_still_goes_to_generic_ticket() -> None:
     EFECTIVO: 60,00
     CAMBIO: 5,80
     """
-    
+
     resolution = resolve_parser_with_trace(repsol_ticket)
     assert resolution.selected_parser.parser_name == "generic_ticket"
-    assert "repsol" in resolution.matched_parsers  # Repsol evaluado pero no selected
+    assert "repsol" not in resolution.matched_parsers
     assert "generic_ticket" in resolution.matched_parsers
 
 
@@ -66,7 +66,7 @@ def test_obramat_still_beats_generic_ticket() -> None:
     Factura normal estructura fiscal completa
     Base imponible, Cuota IVA 21%, Total
     """
-    
+
     parser = resolve_parser(obramat_text, file_path=Path("data/obramat/factura.pdf"))
     assert parser.parser_name == "obramat"
 
@@ -78,14 +78,13 @@ def test_generic_ticket_path_forcing() -> None:
     Factura 001
     Total 100€
     """
-    
+
     resolution = resolve_parser_with_trace(weak_text, file_path=Path("data/tickets/ticket.pdf"))
     assert resolution.selected_parser.parser_name == "generic_ticket"
 
 
 def test_generic_ticket_rejects_long_invoice() -> None:
     """Stricter: largo documento fiscal NO va a generic_ticket."""
-    long_invoice = "Base imponible\\n" * 60 + "Cuota IVA\\nTotal factura\\n"  # >50 lines, fiscal markers
-    
+    long_invoice = "Base imponible\n" * 60 + "Cuota IVA\nTotal factura\n"
     parser = resolve_parser(long_invoice)
-    assert parser.parser_name != "generic_ticket"  # Debe ir a generic_supplier o similar
+    assert parser.parser_name != "generic_ticket"

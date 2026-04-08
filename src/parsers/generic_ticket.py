@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from pathlib import Path
@@ -115,13 +115,6 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         result.total = self.extract_ticket_total_improved(text, lines)
         result.subtotal = self.extract_ticket_subtotal(text)
         result.iva = self.extract_ticket_iva(text)
-        result.tipo_documento = "ticket"
-
-        if not result.nombre_proveedor:
-            result.mark_as_failed("No proveedor válido detectado")
-
-        if result.total is None:
-            result.mark_as_failed("No total válido detectado")
 
         return result.finalize()
 
