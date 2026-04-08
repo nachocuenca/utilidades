@@ -29,19 +29,22 @@ class ParserRegistry:
         self._register_defaults()
 
     def _register_defaults(self) -> None:
-        # Específicos alta prioridad primero
+        # Específicos alta prioridad
         self.register(ObramatInvoiceParser())
         self.register(SaltokiInvoiceParser())
         self.register(RepsolInvoiceParser())
         self.register(EseaformsInvoiceParser())
         self.register(EdieuropaInvoiceParser())
         self.register(MercaluzInvoiceParser())
-        # Generic ticket (prioridad media)
+
+        # Ticket genérico
         self.register(GenericTicketInvoiceParser())
-        # Específicos bajos
+
+        # Específicos secundarios
         self.register(MariaInvoiceParser())
         self.register(AgusInvoiceParser())
-        # Genéricos bajos
+
+        # Fallbacks
         self.register(GenericSupplierInvoiceParser())
         self.register(GenericInvoiceParser())
 

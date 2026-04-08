@@ -135,7 +135,6 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         lines: list[str],
         file_path: str | Path,
     ) -> tuple[str | None, str | None]:
-        # Prioridad 1: HEADER_ROW determinista
         from_filename_number = self.extract_filename_invoice_number(
             file_path,
             [
@@ -153,14 +152,13 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
             ],
         )
 
-        for line in lines[:30]:  # Early lines
+        for line in lines[:30]:
             match = HEADER_ROW_PATTERN.search(line)
             if match:
                 fecha = match.group(1)
                 numero = self.clean_invoice_number_candidate(match.group(2))
                 return numero, fecha
 
-        # Prioridad 2: Patterns específicos en top 20 líneas
         for line in lines[:20]:
             date_match = DATE_PATTERN.search(line)
             number_match = INVOICE_NUMBER_PATTERN.search(line)
@@ -170,7 +168,6 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
                     date_match.group(1),
                 )
 
-        # Fallback filename/text
         text_date_match = DATE_PATTERN.search(text)
         text_number_match = INVOICE_NUMBER_PATTERN.search(text)
         return (
@@ -183,12 +180,10 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         lines: list[str],
         text: str,
     ) -> tuple[float | None, float | None, float | None]:
-        # REGLA FUERTE: bloque resumen final Base + IVA = Total
         summary_base, summary_iva, summary_total = self.extract_summary_block_amounts(lines, text)
         if summary_base is not None and summary_iva is not None and summary_total is not None:
             return summary_base, summary_iva, summary_total
 
-        # Fallbacks legacy
         summary_line_base, summary_line_iva, summary_line_total = self.extract_summary_line_amounts(lines, text)
         if summary_line_base is not None and summary_line_iva is not None and summary_line_total is not None:
             return summary_line_base, summary_line_iva, summary_line_total
@@ -209,16 +204,14 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         if not line:
             return ""
 
-        # OCR robust: handle split numbers like "21 , 0 0" -> "21.00"
         line = re.sub(r"(\d+)\s*,\s*0\s*0", r"\1.00", line)
         line = re.sub(r"(\d+)\s*,\s*0\s+(\d)", r"\1.0\2", line)
         line = re.sub(r"(\d+)\s+,\s+(\d+)", r"\1.\2", line)
-        
-        # Tighten spaces around .,
+
         line = re.sub(r"\s*([.,])\s*", r"\1", line)
         line = re.sub(r"(\d)\s+([.,])", r"\1\2", line)
         line = re.sub(r"([.,])\s+(\d)", r"\1\2", line)
-        line = re.sub(r"(?<=\d)\s+(?=\d)", "", line)  # Merge adjacent numbers
+        line = re.sub(r"(?<=\d)\s+(?=\d)", "", line)
 
         return line
 
@@ -231,12 +224,10 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
             token = raw_tokens[i]
             parsed = parse_amount(token)
 
-            # Merge small integers likely day/month → amount like 2100 → 21.00
             if parsed is not None and parsed.is_integer() and 1 <= parsed <= 99 and i + 1 < len(raw_tokens):
                 next_token = raw_tokens[i + 1]
                 next_parsed = parse_amount(next_token)
                 if next_parsed is not None and next_parsed.is_integer() and 0 <= next_parsed <= 99:
-                    # Try 21 00 → 21.00
                     merged = f"{int(parsed)}.{int(next_parsed):02d}"
                     merged_parsed = parse_amount(merged)
                     if merged_parsed is not None:
@@ -255,23 +246,20 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         lines: list[str],
         text: str,
     ) -> tuple[float | None, float | None, float | None]:
-        """Extrae del bloque resumen FINAL: prioriza Base + IVA = Total (regla fuerte)."""
-        # Buscar en tail (últimas líneas) y todo text
         tail_lines = lines[-20:]
         full_lines = text.splitlines()
         tail_text_lines = full_lines[-30:]
 
         candidates = tail_lines + tail_text_lines
-        
+
         for raw_line in candidates:
-            if len(raw_line.strip()) < 10:  # Skip empty
+            if len(raw_line.strip()) < 10:
                 continue
-            
+
             line = self.normalize_summary_candidate_line(raw_line)
             if not line or len(line) < 10:
                 continue
 
-            # Regex exacto para 4 columnas
             match = SALTOKI_SUMMARY_LINE_PATTERN.match(line)
             if match:
                 base = parse_amount(match.group(1))
@@ -280,17 +268,16 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
                 total = parse_amount(match.group(4))
                 if all(v is not None for v in [base, iva, total]):
                     if rate and round(rate, 2) in {4.0, 10.0, 21.0}:
-                        if abs(base + iva - total) <= 0.05:  # Tol OCR
+                        if abs(base + iva - total) <= 0.05:
                             return base, iva, total
 
-            # Tokens numéricos consecutivos >=4
             tokens = self.extract_amount_tokens_with_joined_pairs(line)
             if len(tokens) >= 4:
                 for i in range(len(tokens) - 3):
                     base_c = tokens[i]
-                    rate_c = tokens[i+1]
-                    iva_c = tokens[i+2]
-                    total_c = tokens[i+3]
+                    rate_c = tokens[i + 1]
+                    iva_c = tokens[i + 2]
+                    total_c = tokens[i + 3]
                     if round(rate_c, 2) in {4.0, 10.0, 21.0} and abs(base_c + iva_c - total_c) <= 0.05:
                         return base_c, iva_c, total_c
 
@@ -301,12 +288,11 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         lines: list[str],
         text: str,
     ) -> tuple[float | None, float | None, float | None]:
-        # Legacy, pero ahora menos usado
         target_indexes = [
             index for index, line in enumerate(lines)
             if "base imponible" in line.lower() and "total" in line.lower()
         ]
-        # ... resto igual
+
         candidate_lines: list[str] = []
         for index in target_indexes:
             window = lines[index + 1 : index + 8]

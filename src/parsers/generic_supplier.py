@@ -151,4 +151,3 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
             return folder_hint
 
         return None
-

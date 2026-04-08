@@ -37,19 +37,16 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
 
         result.nombre_proveedor = folder_hint or "MERCALUZ"
         result.nif_proveedor = self.SUPPLIER_TAX_ID
-        
-        # Prioridad filename Mercaluz-specific
+
         result.numero_factura = self.extract_mercaluz_invoice_number(file_path, text)
         result.fecha_factura = self.extract_filename_date(file_path) or self.extract_date(text)
         result.subtotal = self.extract_subtotal(text)
-        result.iva = self.extract_iva(text)  # Usa super determinista con regla suma
+        result.iva = self.extract_iva(text)
         result.total = self.extract_total(text)
 
         return result.finalize()
 
     def extract_mercaluz_invoice_number(self, file_path: str | Path, text: str) -> str | None:
-        """Regex específicos Mercaluz: filename primero, luego texto."""
-        # Filename patterns Mercaluz (std + ABV layouts)
         filename_num = self.extract_filename_invoice_number(
             file_path,
             [
@@ -61,8 +58,7 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
         )
         if filename_num:
             return filename_num
-        
-        # Texto patterns robustos
+
         text_patterns = [
             r"(?:factura|numero de factura|no factura|factura no)\s*[:\-#]?\s*([ABVF][A-Z]?\d{4}-\d{5}-\d+)",
             r"factura[:\s]+([ABVF][A-Z]?\d{4}-\d{5}-\d+)",
@@ -75,4 +71,5 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
                 candidate = self.clean_invoice_number_candidate(match.group(1))
                 if candidate:
                     return candidate
+
         return self.extract_invoice_number(text)
