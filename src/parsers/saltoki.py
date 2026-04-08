@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from pathlib import Path
@@ -57,10 +57,10 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         result = self.build_result(text, file_path)
         lines = self.extract_lines(text)
 
-        branch = self.detect_branch(text, file_path)
+        branch = self.detect_branch(text, lines, file_path)
 
-        result.nombre_proveedor = self.get_supplier_name(branch, text)
-        result.nif_proveedor = self.get_supplier_tax_id(branch, text)
+        result.nombre_proveedor = self.get_supplier_name(branch)
+        result.nif_proveedor = self.get_supplier_tax_id(branch)
         result.nombre_cliente = self.DEFAULT_CUSTOMER_NAME
         result.nif_cliente = self.DEFAULT_CUSTOMER_TAX_ID
 
@@ -75,50 +75,41 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
 
         return result.finalize()
 
-    def detect_branch(self, text: str, file_path: str | Path) -> str:
-        normalized_text = text.lower()
+    def detect_branch(self, text: str, lines: list[str], file_path: str | Path) -> str:
+        upper_text = text.upper()
+        top_text = "\n".join(lines[:12]).upper()
         path_text = self.get_path_text(file_path)
         folder_hint = (self.get_folder_hint_name(file_path) or "").lower()
 
-        if "benidorm" in normalized_text or "benidorm" in path_text or "benidorm" in folder_hint:
+        if self.ALICANTE_SUPPLIER_TAX_ID in upper_text:
+            return "alicante"
+        if self.BENIDORM_SUPPLIER_TAX_ID in upper_text:
             return "benidorm"
 
-        if "alicante" in normalized_text or "alicante" in path_text or "alicante" in folder_hint:
+        if "SALTOKI ALICANTE" in top_text:
             return "alicante"
+        if "SALTOKI BENIDORM" in top_text:
+            return "benidorm"
+
+        if "alicante" in path_text or "alicante" in folder_hint:
+            return "alicante"
+        if "benidorm" in path_text or "benidorm" in folder_hint:
+            return "benidorm"
 
         return "unknown"
 
-    def get_supplier_name(self, branch: str, text: str) -> str:
+    def get_supplier_name(self, branch: str) -> str:
         if branch == "benidorm":
             return self.BENIDORM_SUPPLIER_NAME
-
         if branch == "alicante":
             return self.ALICANTE_SUPPLIER_NAME
-
-        normalized_text = text.upper()
-        if "BENIDORM" in normalized_text:
-            return self.BENIDORM_SUPPLIER_NAME
-        if "ALICANTE" in normalized_text:
-            return self.ALICANTE_SUPPLIER_NAME
-
         return "SALTOKI"
 
-    def get_supplier_tax_id(self, branch: str, text: str) -> str | None:
+    def get_supplier_tax_id(self, branch: str) -> str | None:
         if branch == "benidorm":
             return self.BENIDORM_SUPPLIER_TAX_ID
-
         if branch == "alicante":
             return self.ALICANTE_SUPPLIER_TAX_ID
-
-        match = re.search(r"CIF\s*:?\s*(B\d{8})", text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-
-        exact_candidates = self.extract_exact_tax_ids(text)
-        for candidate in exact_candidates:
-            if candidate in {self.BENIDORM_SUPPLIER_TAX_ID, self.ALICANTE_SUPPLIER_TAX_ID}:
-                return candidate
-
         return None
 
     def extract_header_data(
@@ -138,15 +129,11 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         from_filename_date = self.extract_filename_date(
             file_path,
             patterns=[
-                r"(20\d{8})",
                 r"(20\d{2}[01]\d[0-3]\d)",
                 r"([0-3]\d[_\-][01]\d[_\-]20\d{2})",
                 r"(20\d{2}[_\-][01]\d[_\-][0-3]\d)",
             ],
         )
-
-        if from_filename_date and re.fullmatch(r"20\d{8}", from_filename_date.replace("-", "")):
-            pass
 
         for line in lines:
             match = HEADER_ROW_PATTERN.search(line)
@@ -245,10 +232,7 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         if normalized == "":
             return False
 
-        if re.search(r"\b\d{1,2}[-/]\d{1,2}[-/]\d{4}\b", normalized):
-            return True
-
-        return False
+        return re.search(r"\b\d{1,2}[-/]\d{1,2}[-/]\d{4}\b", normalized) is not None
 
     def looks_like_vat_rate(self, value: float) -> bool:
         return round(value, 2) in {4.00, 10.00, 21.00}
