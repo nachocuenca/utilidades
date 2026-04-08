@@ -6,12 +6,44 @@ from pathlib import Path
 from src.parsers.base import ParsedInvoiceData
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 from src.utils.amounts import parse_amount
-from src.utils.names import clean_name_candidate
+
+AMOUNT_TOKEN_PATTERN = re.compile(
+    r"[+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{1,4})?"
+)
+
+HEADER_ROW_PATTERN = re.compile(
+    r"^\s*\d+\s+([0-9]{2}[-/][0-9]{2}[-/][0-9]{4})\s+(\d+)\s+\d+\s*$",
+    re.IGNORECASE,
+)
+
+INVOICE_NUMBER_PATTERN = re.compile(
+    r"(?:n[úu]mero|numero|factura|albar[aá]n)\s*(?:de)?\s*(?:factura)?\s*[:#-]?\s*(\d{3,})",
+    re.IGNORECASE,
+)
+
+DATE_PATTERN = re.compile(
+    r"(?:fecha|fec\.)\s*[:#-]?\s*([0-9]{2}[-/][0-9]{2}[-/][0-9]{4})",
+    re.IGNORECASE,
+)
+
+EURO_TOTAL_PATTERN = re.compile(
+    r"([0-9]+(?:[.,][0-9]+)?)\s*€",
+    re.IGNORECASE,
+)
 
 
 class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
     parser_name = "saltoki"
     priority = 490
+
+    BENIDORM_SUPPLIER_NAME = "SALTOKI BENIDORM"
+    BENIDORM_SUPPLIER_TAX_ID = "B71406607"
+
+    ALICANTE_SUPPLIER_NAME = "SALTOKI ALICANTE"
+    ALICANTE_SUPPLIER_TAX_ID = "B71406623"
+
+    DEFAULT_CUSTOMER_NAME = "Daniel Cuenca Moya"
+    DEFAULT_CUSTOMER_TAX_ID = "48334490J"
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         normalized_text = text.lower()
@@ -19,154 +51,215 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         if self.matches_file_path_hint(file_path, ("saltoki",)):
             return True
 
-        return "saltoki" in normalized_text
+        return "saltoki" in normalized_text or "saltoki.es" in normalized_text
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         result = self.build_result(text, file_path)
         lines = self.extract_lines(text)
 
-        result.nombre_proveedor = self.extract_supplier_name_from_text(lines, file_path)
-        result.nif_proveedor = self.extract_supplier_tax_id_from_text(text, file_path)
-        result.nombre_cliente = self.extract_customer_name(lines)
-        result.nif_cliente = self.extract_customer_tax_id_from_text(text)
+        branch = self.detect_branch(text, file_path)
 
-        numero_factura, fecha_factura = self.extract_header_data(lines, file_path)
+        result.nombre_proveedor = self.get_supplier_name(branch, text)
+        result.nif_proveedor = self.get_supplier_tax_id(branch, text)
+        result.nombre_cliente = self.DEFAULT_CUSTOMER_NAME
+        result.nif_cliente = self.DEFAULT_CUSTOMER_TAX_ID
+
+        numero_factura, fecha_factura = self.extract_header_data(text, lines, file_path)
         result.numero_factura = numero_factura
         result.fecha_factura = fecha_factura
 
-        subtotal, iva, total = self.extract_totals(text)
+        subtotal, iva, total = self.extract_totals(lines, text)
         result.subtotal = subtotal
         result.iva = iva
         result.total = total
 
         return result.finalize()
 
-    def extract_supplier_name_from_text(self, lines: list[str], file_path: str | Path) -> str | None:
-        folder_hint = self.get_folder_hint_name(file_path)
+    def detect_branch(self, text: str, file_path: str | Path) -> str:
+        normalized_text = text.lower()
+        path_text = self.get_path_text(file_path)
+        folder_hint = (self.get_folder_hint_name(file_path) or "").lower()
 
-        for line in lines[:8]:
-            upper_line = line.upper()
-            if "SALTOKI" not in upper_line:
-                continue
+        if "benidorm" in normalized_text or "benidorm" in path_text or "benidorm" in folder_hint:
+            return "benidorm"
 
-            if "ALICANTE" in upper_line:
-                return "SALTOKI ALICANTE"
-            if "BENIDORM" in upper_line:
-                return "SALTOKI BENIDORM"
+        if "alicante" in normalized_text or "alicante" in path_text or "alicante" in folder_hint:
+            return "alicante"
 
-        if folder_hint:
-            return folder_hint
+        return "unknown"
+
+    def get_supplier_name(self, branch: str, text: str) -> str:
+        if branch == "benidorm":
+            return self.BENIDORM_SUPPLIER_NAME
+
+        if branch == "alicante":
+            return self.ALICANTE_SUPPLIER_NAME
+
+        normalized_text = text.upper()
+        if "BENIDORM" in normalized_text:
+            return self.BENIDORM_SUPPLIER_NAME
+        if "ALICANTE" in normalized_text:
+            return self.ALICANTE_SUPPLIER_NAME
 
         return "SALTOKI"
 
-    def extract_supplier_tax_id_from_text(self, text: str, file_path: str | Path) -> str | None:
-        match = re.search(r"CIF:\s*(B\d{8})", text, re.IGNORECASE)
-        if match:
-            return match.group(1)
+    def get_supplier_tax_id(self, branch: str, text: str) -> str | None:
+        if branch == "benidorm":
+            return self.BENIDORM_SUPPLIER_TAX_ID
 
-        folder_hint = (self.get_folder_hint_name(file_path) or "").lower()
-        if "alicante" in folder_hint:
-            return "B71406623"
-        if "benidorm" in folder_hint:
-            return "B71406607"
+        if branch == "alicante":
+            return self.ALICANTE_SUPPLIER_TAX_ID
 
-        return None
-
-    def extract_customer_name(self, lines: list[str]) -> str | None:
-        for index, line in enumerate(lines):
-            compact = line.replace(" ", "").upper()
-            if compact == "FACTURA":
-                for offset in range(1, 5):
-                    next_index = index + offset
-                    if next_index >= len(lines):
-                        break
-
-                    candidate = lines[next_index].strip()
-                    if candidate == "":
-                        continue
-                    if candidate.upper().startswith("CL "):
-                        continue
-                    if "N.I.F" in candidate.upper():
-                        continue
-
-                    cleaned = clean_name_candidate(candidate)
-                    if cleaned:
-                        return cleaned
-
-        for index, line in enumerate(lines):
-            if "N.I.F" not in line.upper():
-                continue
-
-            for back in range(1, 5):
-                prev_index = index - back
-                if prev_index < 0:
-                    break
-
-                candidate = lines[prev_index].strip()
-                if candidate == "":
-                    continue
-                if candidate.upper().startswith("CL "):
-                    continue
-                if candidate.upper().startswith("CLIENTE"):
-                    continue
-
-                cleaned = clean_name_candidate(candidate)
-                if cleaned:
-                    return cleaned
-
-        return None
-
-    def extract_customer_tax_id_from_text(self, text: str) -> str | None:
-        match = re.search(r"N\.?I\.?F\.?\s*([A-Z0-9]+)", text, re.IGNORECASE)
+        match = re.search(r"CIF\s*:?\s*(B\d{8})", text, re.IGNORECASE)
         if match:
             return match.group(1)
 
         exact_candidates = self.extract_exact_tax_ids(text)
         for candidate in exact_candidates:
-            if candidate not in {"B71406623", "B71406607"}:
+            if candidate in {self.BENIDORM_SUPPLIER_TAX_ID, self.ALICANTE_SUPPLIER_TAX_ID}:
                 return candidate
 
         return None
 
-    def extract_header_data(self, lines: list[str], file_path: str | Path) -> tuple[str | None, str | None]:
+    def extract_header_data(
+        self,
+        text: str,
+        lines: list[str],
+        file_path: str | Path,
+    ) -> tuple[str | None, str | None]:
         from_filename_number = self.extract_filename_invoice_number(
             file_path,
             [
-                r"^copia de (\d+)",
+                r"copia de (\d+)",
+                r"factura[ _-]*(\d+)",
                 r"^(\d+)",
             ],
         )
-        from_filename_date = self.extract_filename_date(file_path)
-
-        for line in lines:
-            match = re.search(
-                r"^\s*\d+\s+([0-9]{2}[-/][0-9]{2}[-/][0-9]{4})\s+(\d+)\s+\d+\s*$",
-                line,
-                re.IGNORECASE,
-            )
-            if match:
-                fecha = match.group(1)
-                numero = self.clean_invoice_number_candidate(match.group(2))
-                return numero, fecha
-
-        return from_filename_number, from_filename_date
-
-    def extract_totals(self, text: str) -> tuple[float | None, float | None, float | None]:
-        matches = re.findall(
-            r"([0-9]+(?:[.,][0-9]+)?)\s+(?:\d{1,2}[.,]\d{2})\s+([0-9]+(?:[.,][0-9]+)?)\s+([0-9]+(?:[.,][0-9]+)?)\s*€",
-            text,
-            re.IGNORECASE,
+        from_filename_date = self.extract_filename_date(
+            file_path,
+            patterns=[
+                r"(20\d{8})",
+                r"(20\d{2}[01]\d[0-3]\d)",
+                r"([0-3]\d[_\-][01]\d[_\-]20\d{2})",
+                r"(20\d{2}[_\-][01]\d[_\-][0-3]\d)",
+            ],
         )
 
+        if from_filename_date and re.fullmatch(r"20\d{8}", from_filename_date.replace("-", "")):
+            pass
+
+        for line in lines:
+            match = HEADER_ROW_PATTERN.search(line)
+            if not match:
+                continue
+
+            fecha = match.group(1)
+            numero = self.clean_invoice_number_candidate(match.group(2))
+            return numero, fecha
+
+        for line in lines[:20]:
+            date_match = DATE_PATTERN.search(line)
+            number_match = INVOICE_NUMBER_PATTERN.search(line)
+
+            if date_match or number_match:
+                return (
+                    self.clean_invoice_number_candidate(number_match.group(1)) if number_match else from_filename_number,
+                    date_match.group(1) if date_match else from_filename_date,
+                )
+
+        text_date_match = DATE_PATTERN.search(text)
+        text_number_match = INVOICE_NUMBER_PATTERN.search(text)
+
+        return (
+            self.clean_invoice_number_candidate(text_number_match.group(1)) if text_number_match else from_filename_number,
+            text_date_match.group(1) if text_date_match else from_filename_date,
+        )
+
+    def extract_totals(
+        self,
+        lines: list[str],
+        text: str,
+    ) -> tuple[float | None, float | None, float | None]:
+        total = self.extract_total_from_tail(lines, text)
+        base, iva = self.extract_base_and_iva_from_tail(lines)
+
+        if base is None and iva is not None and total is not None:
+            base = round(total - iva, 2)
+
+        if iva is None and base is not None and total is not None:
+            iva = round(total - base, 2)
+
+        if base is None:
+            base = self.extract_labeled_amount(text, [r"base\s+imponible", r"subtotal"])
+
+        if iva is None:
+            iva = self.extract_labeled_amount(text, [r"i\.?v\.?a\.?", r"cuota\s+iva", r"importe\s+iva"])
+
+        if total is None:
+            total = self.extract_labeled_amount(text, [r"total\s+factura", r"importe\s+total", r"\btotal\b"])
+
+        return base, iva, total
+
+    def extract_total_from_tail(self, lines: list[str], text: str) -> float | None:
+        for line in reversed(lines[-15:]):
+            match = EURO_TOTAL_PATTERN.search(line)
+            if not match:
+                continue
+
+            value = parse_amount(match.group(1))
+            if value is not None:
+                return value
+
+        matches = EURO_TOTAL_PATTERN.findall(text)
         if matches:
-            base_value, iva_value, total_value = matches[-1]
-            return (
-                parse_amount(base_value),
-                parse_amount(iva_value),
-                parse_amount(total_value),
-            )
+            value = parse_amount(matches[-1])
+            if value is not None:
+                return value
 
-        total_match = re.search(r"([0-9]+(?:[.,][0-9]+)?)\s*€", text)
-        total_value = parse_amount(total_match.group(1)) if total_match else None
+        return None
 
-        return (None, None, total_value)
+    def extract_base_and_iva_from_tail(self, lines: list[str]) -> tuple[float | None, float | None]:
+        tail_lines = lines[-20:]
+
+        for line in reversed(tail_lines):
+            if self.looks_like_date_line(line):
+                continue
+
+            amounts = self.parse_amounts_from_line(line)
+            if not amounts:
+                continue
+
+            if len(amounts) == 3 and self.looks_like_vat_rate(amounts[1]):
+                return amounts[0], amounts[2]
+
+            if len(amounts) == 2 and self.looks_like_vat_rate(amounts[0]):
+                return None, amounts[1]
+
+            if len(amounts) == 3 and self.looks_like_vat_rate(amounts[0]):
+                return amounts[2], amounts[1]
+
+        return None, None
+
+    def looks_like_date_line(self, line: str) -> bool:
+        normalized = line.strip()
+        if normalized == "":
+            return False
+
+        if re.search(r"\b\d{1,2}[-/]\d{1,2}[-/]\d{4}\b", normalized):
+            return True
+
+        return False
+
+    def looks_like_vat_rate(self, value: float) -> bool:
+        return round(value, 2) in {4.00, 10.00, 21.00}
+
+    def parse_amounts_from_line(self, line: str) -> list[float]:
+        values: list[float] = []
+
+        for raw_match in AMOUNT_TOKEN_PATTERN.findall(line):
+            parsed = parse_amount(raw_match)
+            if parsed is None:
+                continue
+            values.append(parsed)
+
+        return values

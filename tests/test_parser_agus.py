@@ -83,3 +83,35 @@ Total 30.00 €"""
     assert result.numero_factura == "026/00011"
     assert result.fecha_factura == "23-01-2026"
     assert result.iva == 0.0
+
+
+def test_agus_parser_extracts_customer_name_from_real_invoice_00018() -> None:
+    text = """Clinica Almendros
+Benidorm
+03501
+Alacant - España
+613024023 - administracion@clinicaalmendros.com
+Factura Nº: 026/00018
+Fecha: 23/01/2026
+C.I.F. / N.I.F. Titular: 13047306G
+Titular: Rocio Ibañez Torres
+Direccion:
+Provincia: - España C.P.:
+Clinica Almendros 48331209K
+Ref. Concepto Cantidad Precio Importe
+Visita del paciente Rocio Ibañez Torres 1 uds 30.00 € 30.00 €
+Subtotal 30.00 €
+Total 30.00 €"""
+
+    parser = AgusInvoiceParser()
+    result = parser.parse(text, Path("factura-00018.pdf"))
+
+    assert result.nombre_proveedor == "Clinica Almendros"
+    assert result.nif_proveedor == "48331209K"
+    assert result.nombre_cliente == "Rocio Ibañez Torres"
+    assert result.nif_cliente == "13047306G"
+    assert result.numero_factura == "026/00018"
+    assert result.fecha_factura == "23-01-2026"
+    assert result.subtotal == 30.0
+    assert result.iva == 0.0
+    assert result.total == 30.0

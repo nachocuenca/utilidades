@@ -87,20 +87,15 @@ def build_invoice_option_label(row: Mapping[str, Any]) -> str:
     return f"ID {invoice_id} | {tipo_documento} | {archivo} | {proveedor} | {fecha} | {total}"
 
 
-def render_compact_metrics(items: list[tuple[str, str]], columns: int | None = None) -> None:
+def render_inline_metrics(items: list[tuple[str, str]]) -> None:
     if not items:
         return
 
-    columns_count = columns or len(items)
-    columns_count = max(1, min(columns_count, len(items)))
-
-    for start in range(0, len(items), columns_count):
-        chunk = items[start : start + columns_count]
-        cols = st.columns(len(chunk))
-        for col, (label, value) in zip(cols, chunk):
-            with col:
-                st.caption(label)
-                st.markdown(f"**{value}**")
+    cols = st.columns(len(items))
+    for col, (label, value) in zip(cols, items):
+        with col:
+            st.caption(label)
+            st.markdown(f"**{value}**")
 
 
 def render_summary_metrics(
@@ -114,24 +109,20 @@ def render_summary_metrics(
         tipo_documento=tipo_documento,
     )
 
-    total_facturas = len(dataframe.index)
+    total_documentos = len(dataframe.index)
     total_importe = 0.0
     total_iva = 0.0
-    total_revision = 0
 
     if not dataframe.empty:
         total_importe = pd.to_numeric(dataframe["total"], errors="coerce").fillna(0).sum()
         total_iva = pd.to_numeric(dataframe["iva"], errors="coerce").fillna(0).sum()
-        total_revision = int(pd.to_numeric(dataframe["requiere_revision_manual"], errors="coerce").fillna(0).sum())
 
-    render_compact_metrics(
+    render_inline_metrics(
         [
-            ("Documentos", str(total_facturas)),
+            ("Documentos", str(total_documentos)),
             ("Suma total", format_amount(total_importe)),
             ("Suma IVA", format_amount(total_iva)),
-            ("Revisar", str(total_revision)),
-        ],
-        columns=4,
+        ]
     )
 
 
@@ -141,7 +132,7 @@ def render_scan_summary(summary: ScanSummary | None) -> None:
 
     st.caption("Último reescaneo")
 
-    render_compact_metrics(
+    render_inline_metrics(
         [
             ("Encontrados", str(summary.total_encontrados)),
             ("Procesados", str(summary.procesados)),
@@ -149,9 +140,7 @@ def render_scan_summary(summary: ScanSummary | None) -> None:
             ("Actualizados", str(summary.actualizados)),
             ("Omitidos", str(summary.omitidos)),
             ("Fallidos", str(summary.fallidos)),
-            ("Revisar", str(summary.requieren_revision)),
-        ],
-        columns=7,
+        ]
     )
 
     if summary.errores:
@@ -174,6 +163,8 @@ def render_export_download(path_str: str | None, label: str, mime: str) -> None:
     path = Path(path_str)
     if not path.exists():
         return
+
+    st.success(f"Exportacion generada: {path}")
 
     with path.open("rb") as file_handler:
         st.download_button(

@@ -11,24 +11,15 @@ from src.services.exporter import InvoiceExporter
 from src.services.scanner import InvoiceScanner, ScanSummary
 
 VISIBLE_TABLE_COLUMNS = [
-    "id",
-    "tipo_documento",
-    "archivo",
-    "carpeta_origen",
-    "parser_usado",
-    "extractor_origen",
-    "requiere_revision_manual",
     "nombre_proveedor",
     "nif_proveedor",
-    "nombre_cliente",
-    "nif_cliente",
     "numero_factura",
     "fecha_factura",
     "subtotal",
     "iva",
     "total",
-    "created_at",
-    "updated_at",
+    "nombre_cliente",
+    "nif_cliente",
 ]
 
 
