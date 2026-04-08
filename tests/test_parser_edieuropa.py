@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from src.parsers.edieuropa import EdieuropaInvoiceParser
-from src.parsers.base import ParsedInvoiceData
 
 
 @pytest.fixture
@@ -42,4 +41,56 @@ def test_edieuropa_parse_summary_priority(edieuropa_sample: str, parser: Edieuro
     """Verifica que usa bloque final coherente Base+IVA=Total."""
     result = parser.parse(edieuropa_sample, "data/edieuropa/FAC-2024-0456.pdf")
     assert abs((result.subtotal or 0) + (result.iva or 0) - (result.total or 0)) <= 0.01
+
+
+def test_edieuropa_prefiere_filename_robusto_frente_a_ocr_basura(parser: EdieuropaInvoiceParser) -> None:
+    text = """EDIEUROPA
+CIF: B03310091
+FECHA EMISION: 09/04/2026
+Nº FACTURA: DANIEL
+
+Base Imponible: 100.00 €
+IVA 21%: 21.00 €
+TOTAL FACTURA: 121.00 €
+"""
+
+    result = parser.parse(text, "data/edieuropa/Factura_1-A26-11.pdf")
+
+    assert result.numero_factura == "1-A26-11"
+    assert result.fecha_factura == "09-04-2026"
+    assert result.subtotal == 100.0
+    assert result.iva == 21.0
+    assert result.total == 121.0
+
+
+def test_edieuropa_sanea_fragmento_ocr_contaminado(parser: EdieuropaInvoiceParser) -> None:
+    text = """EDIEUROPA
+CIF: B03310091
+FECHA EMISION: 09/04/2026
+tura 1-A26-27
+
+Base Imponible: 200.00 €
+IVA 21%: 42.00 €
+TOTAL FACTURA: 242.00 €
+"""
+
+    result = parser.parse(text, "data/edieuropa/documento_sin_numero.pdf")
+
+    assert result.numero_factura == "1-A26-27"
+
+
+def test_edieuropa_rechaza_numero_basura_sin_estructura(parser: EdieuropaInvoiceParser) -> None:
+    text = """EDIEUROPA
+CIF: B03310091
+FECHA EMISION: 09/04/2026
+Nº FACTURA: DANIEL
+
+Base Imponible: 300.00 €
+IVA 21%: 63.00 €
+TOTAL FACTURA: 363.00 €
+"""
+
+    result = parser.parse(text, "data/edieuropa/documento_sin_patron.pdf")
+
+    assert result.numero_factura is None
 

@@ -9,6 +9,7 @@ from src.parsers.base import ParsedInvoiceData
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 from src.utils.amounts import parse_amount
 from src.utils.dates import normalize_date
+from src.utils.ids import normalize_tax_id
 
 AMOUNT_PATTERN = re.compile(r"[+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?")
 INVOICE_NUMBER_PATTERNS = (
@@ -23,22 +24,27 @@ DATE_PATTERNS = (
     re.compile(r"^fecha\s*[:#-]?\s*(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4})", re.IGNORECASE | re.MULTILINE),
 )
 
-BILLING_COMPANY_PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
+KNOWN_REPSOL_COMPANIES: tuple[tuple[str, str, str], ...] = (
     (
-        re.compile(r"repsol\s+soluciones\s+energet", re.IGNORECASE),
+        "repsol soluciones energeticas",
         "Repsol Soluciones Energéticas, S.A.",
         "A80298839",
     ),
     (
-        re.compile(r"repsol\s+comercial\s+de\s+productos\s+petrol", re.IGNORECASE),
+        "repsol comercial de productos petroliferos",
         "Repsol Comercial de Productos Petrolíferos, S.A.",
         "B28920839",
     ),
     (
-        re.compile(r"repsol\s+petr[oó]leo", re.IGNORECASE),
+        "repsol petroleo",
         "Repsol Petróleo, S.A.",
         "B28049929",
     ),
+)
+
+EMITTED_IN_NAME_OF_PATTERN = re.compile(
+    r"emitida\s+en\s+nombre\s+y\s+por\s+cuenta\s+de",
+    re.IGNORECASE,
 )
 
 TAX_ID_PATTERNS = (
@@ -55,20 +61,27 @@ SIMPLIFIED_TICKET_MARKERS = (
     "cambio",
 )
 
+CUSTOMER_TAX_ID_MARKERS = (
+    "adquiriente",
+    "datos fiscales adquiriente",
+    "cliente",
+    "titular",
+    "destinatario",
+)
+
 
 class RepsolInvoiceParser(GenericSupplierInvoiceParser):
     parser_name = "repsol"
     priority = 360
 
     COMPANY_CIF_MAP = {
-        "Repsol Soluciones Energéticas, S.A.": "A80298839",
-        "Repsol Comercial de Productos Petrolíferos, S.A.": "B28920839",
-        "Repsol Petróleo, S.A.": "B28049929",
+        company_name: tax_id
+        for _needle, company_name, tax_id in KNOWN_REPSOL_COMPANIES
     }
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         normalized_text = self._normalize_text(text)
-        lowered = normalized_text.lower()
+        lowered = self._strip_accents(normalized_text).lower()
 
         if "factura simplificada" in lowered and any(marker in lowered for marker in SIMPLIFIED_TICKET_MARKERS):
             return False
@@ -78,7 +91,7 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
         if self.matches_file_path_hint(file_path, ("repsol",)):
             score += 1
 
-        if "repsol" in lowered:
+        if "repsol" in lowered or self._match_known_repsol_company(normalized_text) is not None:
             score += 2
 
         if any(
@@ -91,8 +104,14 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
                 "repsol comercial",
                 "repsol petr",
                 "repsol soluciones energ",
+                "e.s./a.s. lugar suministro",
+                "datos del suministro",
+                "importe del producto",
             )
         ):
+            score += 1
+
+        if "datos del suministro" in lowered and "importe del producto" in lowered:
             score += 1
 
         return score >= 2
@@ -124,7 +143,7 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
         return result.finalize()
 
     def _normalize_text(self, text: str) -> str:
-        text = html.unescape(text or "")
+        text = self._repair_common_mojibake(html.unescape(text or ""))
         return text.replace("&#10;", "\n").replace("\r\n", "\n").replace("\r", "\n")
 
     def _strip_accents(self, value: str) -> str:
@@ -133,20 +152,113 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
             if not unicodedata.combining(char)
         )
 
+    def _repair_common_mojibake(self, value: str) -> str:
+        if not value or not any(marker in value for marker in ("Ã", "Â", "â")):
+            return value
+
+        try:
+            repaired = value.encode("cp1252").decode("utf-8")
+        except UnicodeError:
+            return value
+
+        if repaired.count("\ufffd") > value.count("\ufffd"):
+            return value
+
+        return repaired
+
+    def _normalize_repsol_lookup_text(self, value: str) -> str:
+        normalized = self._repair_common_mojibake(html.unescape(value or ""))
+        normalized = self._strip_accents(normalized).lower()
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _extract_emitted_billing_fragment(self, text: str) -> str | None:
+        ascii_text = self._strip_accents(text)
+        match = EMITTED_IN_NAME_OF_PATTERN.search(ascii_text)
+        if not match:
+            return None
+
+        start = match.start()
+        end = min(len(text), start + 800)
+        return text[start:end]
+
+    def _match_known_repsol_company(self, text: str) -> tuple[str, str] | None:
+        lookup_text = self._normalize_repsol_lookup_text(text)
+        if not lookup_text:
+            return None
+
+        best_match: tuple[int, str, str] | None = None
+
+        for needle, company_name, tax_id in KNOWN_REPSOL_COMPANIES:
+            position = lookup_text.find(needle)
+            if position < 0:
+                continue
+
+            if best_match is None or position < best_match[0]:
+                best_match = (position, company_name, tax_id)
+
+        if best_match is None:
+            return None
+
+        return best_match[1], best_match[2]
+
+    def _resolve_repsol_billing_company(self, text: str) -> tuple[str, str] | None:
+        emitted_fragment = self._extract_emitted_billing_fragment(text)
+        if emitted_fragment:
+            emitted_match = self._match_known_repsol_company(emitted_fragment)
+            if emitted_match is not None:
+                return emitted_match
+
+        return self._match_known_repsol_company(text)
+
+    def _collect_repsol_customer_tax_ids(self, text: str) -> set[str]:
+        customer_tax_ids = {"48334490J"}
+        lines = self.extract_lines(text)
+
+        for index, line in enumerate(lines):
+            normalized_line = self._normalize_repsol_lookup_text(line)
+            if not any(marker in normalized_line for marker in CUSTOMER_TAX_ID_MARKERS):
+                continue
+
+            fragment = "\n".join(lines[index:index + 4])
+            customer_tax_ids.update(self.extract_exact_tax_ids(fragment))
+
+            for pattern in TAX_ID_PATTERNS:
+                for match in pattern.finditer(fragment):
+                    candidate = normalize_tax_id(match.group(1))
+                    if candidate:
+                        customer_tax_ids.add(candidate)
+
+        return customer_tax_ids
+
+    def _extract_valid_repsol_tax_id(
+        self,
+        text: str | None,
+        *,
+        rejected_tax_ids: set[str],
+    ) -> str | None:
+        if not text:
+            return None
+
+        for pattern in TAX_ID_PATTERNS:
+            for match in pattern.finditer(text):
+                candidate = normalize_tax_id(match.group(1))
+                if candidate and candidate not in rejected_tax_ids:
+                    return candidate
+
+        for tax_id in self.extract_exact_tax_ids(text):
+            normalized_tax_id = normalize_tax_id(tax_id)
+            if normalized_tax_id and normalized_tax_id not in rejected_tax_ids:
+                return normalized_tax_id
+
+        return None
+
     def extract_repsol_billing_company(self, text: str) -> str | None:
-        lowered = text.lower()
-        ascii_text = self._strip_accents(text).lower()
+        billing_company = self._resolve_repsol_billing_company(text)
+        if billing_company is not None:
+            return billing_company[0]
 
-        if "emitida en nombre y por cuenta de" in lowered:
-            start = lowered.find("emitida en nombre y por cuenta de")
-            tail = text[start : start + 1500]
-            for pattern, company_name, _tax_id in BILLING_COMPANY_PATTERNS:
-                if pattern.search(tail):
-                    return company_name
-
-        for pattern, company_name, _tax_id in BILLING_COMPANY_PATTERNS:
-            if pattern.search(text):
-                return company_name
+        ascii_text = self._normalize_repsol_lookup_text(text)
 
         if "repsol estacion de servicio" in ascii_text:
             return "Repsol Estación de Servicio"
@@ -160,33 +272,25 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
         if company_name in self.COMPANY_CIF_MAP:
             return self.COMPANY_CIF_MAP[company_name]
 
-        lowered = text.lower()
+        resolved_company = self._resolve_repsol_billing_company(text)
+        if resolved_company is not None:
+            return resolved_company[1]
 
-        if "emitida en nombre y por cuenta de" in lowered:
-            start = lowered.find("emitida en nombre y por cuenta de")
-            tail = text[start : start + 1500]
+        rejected_tax_ids = self._collect_repsol_customer_tax_ids(text)
 
-            for pattern in TAX_ID_PATTERNS:
-                match = pattern.search(tail)
-                if match:
-                    candidate = match.group(1).replace("-", "").upper()
-                    if candidate != "48334490J":
-                        return candidate
+        emitted_candidate = self._extract_valid_repsol_tax_id(
+            self._extract_emitted_billing_fragment(text),
+            rejected_tax_ids=rejected_tax_ids,
+        )
+        if emitted_candidate is not None:
+            return emitted_candidate
 
-            for tax_id in self.extract_exact_tax_ids(tail):
-                if tax_id != "48334490J":
-                    return tax_id
-
-        for pattern in TAX_ID_PATTERNS:
-            match = pattern.search(text)
-            if match:
-                candidate = match.group(1).replace("-", "").upper()
-                if candidate != "48334490J":
-                    return candidate
-
-        for tax_id in self.extract_exact_tax_ids(text):
-            if tax_id != "48334490J":
-                return tax_id
+        direct_candidate = self._extract_valid_repsol_tax_id(
+            text,
+            rejected_tax_ids=rejected_tax_ids,
+        )
+        if direct_candidate is not None:
+            return direct_candidate
 
         return None
 
@@ -214,30 +318,37 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
         self,
         text: str,
     ) -> tuple[float | None, float | None, float | None]:
-        tail_lines = self.extract_lines(text)[-25:]
+        tail_lines = self.extract_lines(text)[-40:]
 
-        base = self._extract_tail_amount_from_markers(
+        base_candidates = self._extract_tail_amount_candidates(
             tail_lines,
             ("BASE IMPONIBLE", "IMPORTE DEL PRODUCTO"),
         )
-        iva = self._extract_tail_amount_from_markers(
+        iva_candidates = self._extract_tail_amount_candidates(
             tail_lines,
             ("CUOTA IVA", "IVA "),
         )
-        total = self._extract_tail_amount_from_markers(
+        total_candidates = self._extract_tail_amount_candidates(
             tail_lines,
             ("TOTAL FACTURA EUROS", "TOTAL FACTURA"),
         )
 
-        if base is not None and iva is not None and total is not None:
-            if abs((base + iva) - total) <= 0.02:
-                return base, iva, total
+        coherent_tail = self._pick_repsol_coherent_tail_breakdown(
+            base_candidates,
+            iva_candidates,
+            total_candidates,
+        )
+        if coherent_tail is not None:
+            return coherent_tail
 
         summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
         if summary_base is not None and summary_iva is not None and summary_total is not None:
             if abs((summary_base + summary_iva) - summary_total) <= 0.02:
                 return summary_base, summary_iva, summary_total
 
+        base = base_candidates[-1][1] if base_candidates else None
+        iva = iva_candidates[-1][1] if iva_candidates else None
+        total = total_candidates[-1][1] if total_candidates else None
         return base, iva, total
 
     def extract_repsol_subtotal(self, text: str) -> float | None:
@@ -271,7 +382,7 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
         if value is not None:
             return value
 
-        stem_match = re.search(r"(\d+(?:,\d{2})?)\s*€", Path(file_path).stem)
+        stem_match = re.search(r"(\d+(?:,\d{2})?)\s*(?:€|â‚¬)", Path(file_path).stem)
         if stem_match:
             parsed = parse_amount(stem_match.group(1))
             if parsed is not None:
@@ -279,18 +390,21 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
 
         return self.extract_total(text)
 
-    def _extract_tail_amount_from_markers(
+    def _extract_tail_amount_candidates(
         self,
         tail_lines: list[str],
         markers: tuple[str, ...],
-    ) -> float | None:
-        for raw_line in reversed(tail_lines):
+    ) -> list[tuple[int, float]]:
+        normalized_markers = tuple(self._strip_accents(marker).upper() for marker in markers)
+        candidates: list[tuple[int, float]] = []
+
+        for index, raw_line in enumerate(tail_lines):
             line = raw_line.strip()
             if not line:
                 continue
 
             upper_line = self._strip_accents(line).upper()
-            if not any(self._strip_accents(marker).upper() in upper_line for marker in markers):
+            if not any(marker in upper_line for marker in normalized_markers):
                 continue
 
             values: list[float] = []
@@ -300,6 +414,29 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
                     values.append(parsed)
 
             if values:
-                return values[-1]
+                candidates.append((index, values[-1]))
+
+        return candidates
+
+    def _pick_repsol_coherent_tail_breakdown(
+        self,
+        base_candidates: list[tuple[int, float]],
+        iva_candidates: list[tuple[int, float]],
+        total_candidates: list[tuple[int, float]],
+    ) -> tuple[float, float, float] | None:
+        for total_index, total_value in reversed(total_candidates):
+            for iva_index, iva_value in reversed(iva_candidates):
+                if iva_index > total_index:
+                    continue
+
+                for base_index, base_value in reversed(base_candidates):
+                    if base_index > iva_index:
+                        continue
+
+                    if total_index - base_index > 6:
+                        continue
+
+                    if abs((base_value + iva_value) - total_value) <= 0.02:
+                        return base_value, iva_value, total_value
 
         return None

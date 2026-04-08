@@ -9,6 +9,11 @@ from src.utils.dates import normalize_date
 
 
 DATE_PATTERN = re.compile(r"\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b")
+INVOICE_LABEL_PATTERN = re.compile(
+    r"(?:n[\W_]*[º°o]?|no|num(?:ero)?)?\s*(?:de\s*)?factura\s*[:#\-]?\s*([^\n\r]+)",
+    re.IGNORECASE,
+)
+TAIL_WINDOW_LINES = 30
 
 
 class EdieuropaInvoiceParser(BaseInvoiceParser):
@@ -53,25 +58,14 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         result.nombre_proveedor = "EDIEUROPA"
         result.nif_proveedor = self.SUPPLIER_TAX_ID
 
-        text_invoice_number = self.extract_invoice_number(text)
-        filename_invoice_number = self.extract_filename_invoice_number(
-            file_path,
-            [
-                r"([Ff][Aa][Cc]-?\d{4}-\d+)",
-                r"([Ff]actura[-_ ]*[0-9A-Z\-]+)",
-                r"(1-A\d{2}-\d+)",
-            ],
-        )
-        result.numero_factura = self._normalize_invoice_number(
-            text_invoice_number or filename_invoice_number
-        )
+        result.numero_factura = self.extract_edieuropa_invoice_number(text, file_path)
 
         result.fecha_factura = self._extract_project_date(text) or self._extract_project_date(
             str(Path(file_path).stem)
         )
 
         lines = self.extract_lines(text)
-        tail_text = " ".join(lines[-20:])
+        tail_text = "\n".join(lines[-TAIL_WINDOW_LINES:])
 
         base_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS["base"])
         iva_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS["iva"])
@@ -88,11 +82,30 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
                     result.total = total_val
                     return result.finalize()
 
+        summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
+        if summary_base is not None and summary_iva is not None and summary_total is not None:
+            if abs((summary_base + summary_iva) - summary_total) <= 0.01:
+                result.subtotal = summary_base
+                result.iva = summary_iva
+                result.total = summary_total
+                return result.finalize()
+
         result.subtotal = self.extract_subtotal(text)
         result.iva = self.extract_iva(text)
         result.total = self.extract_total(text)
 
         return result.finalize()
+
+    def extract_edieuropa_invoice_number(self, text: str, file_path: str | Path) -> str | None:
+        filename_invoice_number = self._extract_invoice_number_from_filename(file_path)
+        if filename_invoice_number:
+            return filename_invoice_number
+
+        text_invoice_number = self._extract_invoice_number_from_text(text)
+        if text_invoice_number:
+            return text_invoice_number
+
+        return None
 
     def _extract_amount(self, text: str, patterns: list[str]) -> re.Match[str] | None:
         for pattern in patterns:
@@ -116,11 +129,61 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
 
         return normalize_date(match.group(0))
 
+    def _extract_invoice_number_from_filename(self, file_path: str | Path) -> str | None:
+        stem = Path(file_path).stem
+        return self._match_invoice_number(stem, allow_bare_year=False)
+
+    def _extract_invoice_number_from_text(self, text: str) -> str | None:
+        for match in INVOICE_LABEL_PATTERN.finditer(text):
+            candidate = self._normalize_invoice_number(match.group(1))
+            if candidate:
+                return candidate
+
+        top_lines = self.extract_lines(text)[:18]
+        for line in top_lines:
+            candidate = self._normalize_invoice_number(line)
+            if candidate:
+                return candidate
+
+        return None
+
     def _normalize_invoice_number(self, value: str | None) -> str | None:
         if not value:
             return None
 
-        cleaned = value.strip()
-        cleaned = re.sub(r"^[Ff][Aa][Cc]-?", "", cleaned).strip()
-        cleaned = re.sub(r"^[Ff]actura\s+", "", cleaned, flags=re.IGNORECASE).strip()
-        return cleaned
+        cleaned = re.sub(r"\s+", " ", value).strip()
+
+        return self._match_invoice_number(cleaned, allow_bare_year=True)
+
+    def _match_invoice_number(self, value: str, *, allow_bare_year: bool) -> str | None:
+        cleaned = re.sub(r"\s+", " ", value).strip()
+
+        fac_match = re.search(
+            r"(?<![A-Z0-9])FAC\s*[-_ ]\s*(\d{4})\s*[-_ ]\s*(\d{3,6})(?![A-Z0-9])",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if fac_match:
+            return f"{fac_match.group(1)}-{fac_match.group(2)}"
+
+        structured_match = re.search(
+            r"(?<![A-Z0-9])(\d+)\s*-\s*(A\d{2})\s*-\s*(\d{1,6})(?![A-Z0-9])",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if structured_match:
+            return (
+                f"{structured_match.group(1)}-"
+                f"{structured_match.group(2).upper()}-"
+                f"{structured_match.group(3)}"
+            )
+
+        if allow_bare_year:
+            bare_year_match = re.search(
+                r"(?<![A-Z0-9])(\d{4})\s*-\s*(\d{3,6})(?![A-Z0-9])",
+                cleaned,
+            )
+            if bare_year_match:
+                return f"{bare_year_match.group(1)}-{bare_year_match.group(2)}"
+
+        return None

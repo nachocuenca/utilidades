@@ -144,7 +144,7 @@ def test_scanner_process_file_returns_parser_trace_with_matched_parsers(monkeypa
     assert int(result["invoice_id"]) > 0
 
 
-def test_scanner_applies_default_customer_even_when_root_scan_has_no_folder_origin(monkeypatch, tmp_path: Path) -> None:
+def test_scanner_keeps_customer_empty_when_root_scan_has_no_folder_origin(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("FORCE_DEFAULT_CUSTOMER_FOR_FACTURAS", "true")
     monkeypatch.setenv("DEFAULT_CUSTOMER_NAME", "Daniel Cuenca Moya")
     monkeypatch.setenv("DEFAULT_CUSTOMER_TAX_ID", "48334490J")
@@ -203,8 +203,8 @@ Registro Mercantil de Madrid, Tomo 2530 gral, Folio 1, Hoja M-44194, incr 665 C.
     assert len(stored) == 1
     assert stored[0].nombre_proveedor == "Repsol Soluciones Energéticas, S.A."
     assert stored[0].nif_proveedor == "A80298839"
-    assert stored[0].nombre_cliente == "Daniel Cuenca Moya"
-    assert stored[0].nif_cliente == "48334490J"
+    assert stored[0].nombre_cliente is None
+    assert stored[0].nif_cliente is None
     assert stored[0].subtotal == 62.6
     assert stored[0].iva == 13.15
     assert stored[0].total == 75.75

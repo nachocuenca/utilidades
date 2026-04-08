@@ -62,6 +62,27 @@ def test_registry_keeps_repsol_for_standard_invoice_shape() -> None:
     assert "repsol" in resolution.matched_parsers
 
 
+def test_registry_keeps_repsol_for_real_runtime_shape_without_path_hint() -> None:
+    text = """NÂº Factura: 096943/5/26/000169
+Fecha: 09/01/2026
+E.S./A.S. Lugar Suministro (*)
+CAMPSA ESTACIONES SERVICIO SA
+Datos Fiscales Adquiriente CUENCA MOYA DANIEL (CIF/NIF: 48334490J)
+Datos del suministro
+Importe del producto (Base Imponible) 62,60 â‚¬
+IVA 21,00% de 62,60 â‚¬ 13,15 â‚¬
+TOTAL FACTURA EUROS........ 75,75 â‚¬
+(*) Esta factura estÃ¡ emitida en nombre y por cuenta de Repsol Soluciones EnergÃ©ticas, S.A."""
+
+    resolution = resolve_parser_with_trace(
+        text=text,
+        file_path=Path(r"C:\temp\proveedores\enero\factura_0901.pdf"),
+    )
+
+    assert resolution.selected_parser.parser_name == "repsol"
+    assert "repsol" in resolution.matched_parsers
+
+
 def test_repsol_std_complete_parsing() -> None:
     fixture_path = Path("tests/fixtures/sample_texts/repsol_std.txt")
     text = fixture_path.read_text()
@@ -108,6 +129,43 @@ def test_repsol_partial_no_desglose() -> None:
     assert result.numero_factura == "TK202412345"
     assert result.fecha_factura == "25-04-2024"
     assert result.total == 45.67
+
+
+def test_repsol_emitida_clause_beats_generic_name_and_forces_known_cif() -> None:
+    text = """REPSOL
+NÂº Factura: 123456/7/26/000321
+Fecha: 08/04/2026
+E.S./A.S. Lugar Suministro (*)
+CAMPSA ESTACIONES SERVICIO SA
+Datos Fiscales Adquiriente CUENCA MOYA DANIEL (CIF/NIF: 48334490J)
+Datos del suministro
+Importe del producto (Base Imponible) 10,00 â‚¬
+IVA 21,00% de 10,00 â‚¬ 2,10 â‚¬
+TOTAL FACTURA EUROS........ 12,10 â‚¬
+(*) Esta factura estÃ¡ emitida en nombre
+y por cuenta de:
+Repsol Comercial de Productos Petroliferos, S.A."""
+
+    result = RepsolInvoiceParser().parse(text, Path(r"C:\temp\proveedores\gasolina\factura_0804.pdf"))
+
+    assert result.nombre_proveedor == "Repsol Comercial de Productos Petrolíferos, S.A."
+    assert result.nif_proveedor == "B28920839"
+    assert result.numero_factura == "123456/7/26/000321"
+    assert result.fecha_factura == "08-04-2026"
+    assert result.subtotal == 10.0
+    assert result.iva == 2.1
+    assert result.total == 12.1
+
+
+def test_repsol_supplier_tax_id_never_returns_customer_nif() -> None:
+    text = """REPSOL
+Adquiriente
+CUENCA MOYA DANIEL
+Datos Fiscales Adquiriente CUENCA MOYA DANIEL (CIF/NIF: 48334490J)"""
+
+    tax_id = RepsolInvoiceParser().extract_repsol_supplier_tax_id(text, "REPSOL")
+
+    assert tax_id is None
 
 
 def test_repsol_2026_real_facturadora_0901() -> None:
