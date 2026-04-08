@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -45,7 +45,7 @@ def test_registry_prefers_generic_ticket_for_repsol_simplificada() -> None:
 def test_registry_keeps_repsol_for_standard_invoice_shape() -> None:
     text = """
     REPSOL COMERCIAL DE PRODUCTOS PETROLIFEROS S.A.
-    CIF: B28920839
+    CIF: A80298839
     FACTURA: 123456/1/26/123456
     FECHA FACTURA: 08/04/2026
     BASE IMPONIBLE: 100,00
@@ -104,6 +104,7 @@ def test_repsol_partial_no_desglose() -> None:
     parser = RepsolInvoiceParser()
     result = parser.parse(text, file_path)
 
+    assert result.nombre_proveedor == "Repsol Estación Servicio"
     assert result.numero_factura == "TK202412345"
     assert result.fecha_factura == "25-04-2024"
     assert result.total == 45.67

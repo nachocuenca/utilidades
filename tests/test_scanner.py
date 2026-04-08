@@ -142,3 +142,69 @@ def test_scanner_process_file_returns_parser_trace_with_matched_parsers(monkeypa
     assert "generic_ticket" in result["matched_parsers"]
     assert result["document_type"] == "ticket"
     assert int(result["invoice_id"]) > 0
+
+
+def test_scanner_applies_default_customer_even_when_root_scan_has_no_folder_origin(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("FORCE_DEFAULT_CUSTOMER_FOR_FACTURAS", "true")
+    monkeypatch.setenv("DEFAULT_CUSTOMER_NAME", "Daniel Cuenca Moya")
+    monkeypatch.setenv("DEFAULT_CUSTOMER_TAX_ID", "48334490J")
+    get_settings.cache_clear()
+
+    inbox_dir = tmp_path / "repsol"
+    inbox_dir.mkdir(parents=True, exist_ok=True)
+
+    pdf_path = inbox_dir / "09_01 75,75 €.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake file for tests")
+
+    repository = InvoiceRepository(db_path=tmp_path / "app.db")
+    scanner = InvoiceScanner(repository=repository, inbox_dir=inbox_dir)
+
+    repsol_text = """Nº Factura: 096943/5/26/000169
+Fecha: 09/01/2026
+F. Operación: 09/01/2026
+E.S./A.S. Lugar Suministro (*)
+CRED BENIDORM
+CR CV-70 P.K. 47
+03500 BENIDORM (ALICANTE)
+CAMPSA ESTACIONES SERVICIO SA
+Adquiriente
+CUENCA MOYA DANIEL
+CALLE MARAVALL 31 SEGUNDO E
+03501 BENIDORM (ALICANTE)
+Matrícula: 8991KBS
+Datos Fiscales Adquiriente CUENCA MOYA DANIEL (CIF/NIF: 48334490J)
+CALLE MARAVALL 31 SEGUNDO E
+03501 BENIDORM (ALICANTE)
+Datos del suministro
+Fecha Productos Litros €/L Importe
+09.01.2026 Diesel e+ 53,01 1,429 75,75
+Importe del producto (Base Imponible) 62,60 €
+IVA 21,00% de 62,60 € 13,15 €
+TOTAL FACTURA EUROS........ 75,75 €
+(*) Esta factura está emitida en nombre y por cuenta de Repsol Soluciones Energéticas, S.A.
+Repsol Soluciones Energéticas, S.A. Méndez Alvaro, 44. Madrid 28045
+Registro Mercantil de Madrid, Tomo 2530 gral, Folio 1, Hoja M-44194, incr 665 C.I.F. A-80298839"""
+
+    def fake_read_pdf_text(path: str | Path) -> PdfReadResult:
+        resolved = Path(path).resolve()
+        return PdfReadResult(
+            file_path=resolved,
+            text=repsol_text,
+            page_count=1,
+            extractor="fake",
+        )
+
+    monkeypatch.setattr("src.services.scanner.read_pdf_text", fake_read_pdf_text)
+
+    summary = scanner.scan()
+    assert summary.procesados == 1
+
+    stored = repository.list_invoices()
+    assert len(stored) == 1
+    assert stored[0].nombre_proveedor == "Repsol Soluciones Energéticas, S.A."
+    assert stored[0].nif_proveedor == "A80298839"
+    assert stored[0].nombre_cliente == "Daniel Cuenca Moya"
+    assert stored[0].nif_cliente == "48334490J"
+    assert stored[0].subtotal == 62.6
+    assert stored[0].iva == 13.15
+    assert stored[0].total == 75.75

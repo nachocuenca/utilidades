@@ -1,14 +1,13 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 from pathlib import Path
 
 from src.parsers.base import BaseInvoiceParser, ParsedInvoiceData
 from src.utils.amounts import parse_amount
-from src.utils.dates import normalize_date
 
 
-DATE_PATTERN = re.compile(r"\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b")
+DATE_PATTERN = re.compile(r"\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b")
 
 
 class EdieuropaInvoiceParser(BaseInvoiceParser):
@@ -42,7 +41,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         has_tax_id = self.SUPPLIER_TAX_ID.lower() in normalized_text
         has_company_context = any(
             marker in normalized_text
-            for marker in ("electrodom", "m[áa]quinas", "electrodomésticos", "maquinas")
+            for marker in ("electrodom", "máquinas", "maquinas", "electrodomésticos")
         )
 
         return has_tax_id or (has_brand and (path_hint or has_company_context))
@@ -61,13 +60,9 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
                 r"([Ff]actura[-_ ]*[0-9A-Z\-]+)",
             ],
         )
-        result.numero_factura = self._normalize_invoice_number(
-            text_invoice_number or filename_invoice_number
-        )
+        result.numero_factura = text_invoice_number or filename_invoice_number
 
-        result.fecha_factura = self._extract_project_date(text) or self._extract_project_date(
-            str(Path(file_path).stem)
-        )
+        result.fecha_factura = self._extract_iso_date(text) or self._extract_iso_date(str(Path(file_path).stem))
 
         lines = self.extract_lines(text)
         tail_text = " ".join(lines[-20:])
@@ -85,13 +80,13 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
                     result.subtotal = base_val
                     result.iva = iva_val
                     result.total = total_val
-                    return result.finalize()
+                    return self._finalize_with_iso_date(result)
 
         result.subtotal = self.extract_subtotal(text)
         result.iva = self.extract_iva(text)
         result.total = self.extract_total(text)
 
-        return result.finalize()
+        return self._finalize_with_iso_date(result)
 
     def _extract_amount(self, text: str, patterns: list[str]) -> re.Match[str] | None:
         for pattern in patterns:
@@ -105,7 +100,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
             return None
         return parse_amount(match.group(1))
 
-    def _extract_project_date(self, value: str | None) -> str | None:
+    def _extract_iso_date(self, value: str | None) -> str | None:
         if not value:
             return None
 
@@ -113,9 +108,23 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         if not match:
             return None
 
-        return normalize_date(match.group(0))
+        first, second, third = match.groups()
+        if len(first) == 4:
+            year = int(first)
+            month = int(second)
+            day = int(third)
+        else:
+            day = int(first)
+            month = int(second)
+            year = int(third)
+            if year < 100:
+                year = 2000 + year if year <= 49 else 1900 + year
 
-    def _normalize_invoice_number(self, value: str | None) -> str | None:
-        if not value:
-            return None
-        return re.sub(r"^[Ff][Aa][Cc]-?", "", value).strip()
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    def _finalize_with_iso_date(self, result: ParsedInvoiceData) -> ParsedInvoiceData:
+        iso_date = result.fecha_factura
+        finalized = result.finalize()
+        if iso_date:
+            finalized.fecha_factura = iso_date
+        return finalized

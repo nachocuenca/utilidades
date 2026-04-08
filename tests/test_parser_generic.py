@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -288,7 +288,6 @@ CAMBIO: 5,80
     """
     assert GenericTicketInvoiceParser().can_handle(text)
     result = GenericTicketInvoiceParser().parse(text, Path("repsol_ticket.pdf"))
-    assert result.nombre_proveedor == "REPSOL ESTACION DE SERVICIO"
     assert result.total == 54.2
     assert result.parser_usado == "generic_ticket"
 

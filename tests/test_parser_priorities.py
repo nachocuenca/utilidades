@@ -1,13 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
 from src.parsers.registry import resolve_parser, resolve_parser_with_trace
-from src.parsers.maria import MariaInvoiceParser
-from src.parsers.agus import AgusInvoiceParser
-from src.parsers.generic_ticket import GenericTicketInvoiceParser
 from src.parsers.obramat import ObramatInvoiceParser
-from src.parsers.repsol import RepsolInvoiceParser
 
 
 def test_generic_ticket_no_longer_intercepts_maria() -> None:
@@ -42,7 +38,7 @@ def test_generic_ticket_no_longer_intercepts_agus() -> None:
 
 
 def test_repsol_simplificada_still_goes_to_generic_ticket() -> None:
-    """Repsol rechaza simplificadas y generic_ticket gana."""
+    """Repsol simplificada debe ir a generic_ticket."""
     repsol_ticket = """
     REPSOL ESTACION DE SERVICIO
     FACTURA SIMPLIFICADA
@@ -86,5 +82,6 @@ def test_generic_ticket_path_forcing() -> None:
 def test_generic_ticket_rejects_long_invoice() -> None:
     """Stricter: largo documento fiscal NO va a generic_ticket."""
     long_invoice = "Base imponible\n" * 60 + "Cuota IVA\nTotal factura\n"
+
     parser = resolve_parser(long_invoice)
     assert parser.parser_name != "generic_ticket"

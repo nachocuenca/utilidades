@@ -97,8 +97,9 @@ class InvoiceScanner:
         if not self.settings.force_default_customer_for_facturas:
             return
 
-        if folder_origin is None or str(folder_origin).strip() == "":
-            return
+        # Si se escanea directamente una carpeta de proveedor como raíz,
+        # folder_origin puede venir vacío y aun así seguimos queriendo aplicar
+        # el cliente Dani por defecto a las facturas.
 
         default_name = self.settings.default_customer_name.strip()
         default_tax_id = self.settings.default_customer_tax_id.strip()
