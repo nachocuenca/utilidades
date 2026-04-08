@@ -15,10 +15,24 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         normalized_text = text.lower()
 
-        if self.matches_file_path_hint(file_path, ("repsol",)):
-            return True
+        if "factura simplificada" in normalized_text and any(
+            marker in normalized_text
+            for marker in ("n° op", "nº op", "no op", "efectivo", "cambio")
+        ):
+            return False
 
-        return "repsol" in normalized_text
+        score = 0
+
+        if self.matches_file_path_hint(file_path, ("repsol",)):
+            score += 1
+
+        if "repsol" in normalized_text:
+            score += 2
+
+        if any(marker in normalized_text for marker in ("waylet", "repsol comercial", "estación de servicio", "estacion de servicio")):
+            score += 1
+
+        return score >= 2
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         result = self.build_result(text, file_path)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from src.parsers.agus import AgusInvoiceParser
@@ -14,6 +15,12 @@ from src.parsers.mercaluz import MercaluzInvoiceParser
 from src.parsers.obramat import ObramatInvoiceParser
 from src.parsers.repsol import RepsolInvoiceParser
 from src.parsers.saltoki import SaltokiInvoiceParser
+
+
+@dataclass(slots=True)
+class ParserResolution:
+    selected_parser: BaseInvoiceParser
+    matched_parsers: list[str]
 
 
 class ParserRegistry:
@@ -46,14 +53,18 @@ class ParserRegistry:
     def list_names(self) -> list[str]:
         return sorted(self._parsers.keys())
 
-    def resolve(
+    def evaluate(
         self,
         text: str,
         file_path: str | Path | None = None,
         parser_name: str | None = None,
-    ) -> BaseInvoiceParser:
+    ) -> ParserResolution:
         if parser_name:
-            return self.get(parser_name)
+            parser = self.get(parser_name)
+            return ParserResolution(
+                selected_parser=parser,
+                matched_parsers=[parser.parser_name],
+            )
 
         ordered_parsers = sorted(
             self._parsers.values(),
@@ -61,11 +72,38 @@ class ParserRegistry:
             reverse=True,
         )
 
-        for parser in ordered_parsers:
-            if parser.can_handle(text, file_path=file_path):
-                return parser
+        matched_parsers: list[str] = []
+        selected_parser: BaseInvoiceParser | None = None
 
-        return self.get("generic")
+        for parser in ordered_parsers:
+            if not parser.can_handle(text, file_path=file_path):
+                continue
+
+            matched_parsers.append(parser.parser_name)
+            if selected_parser is None:
+                selected_parser = parser
+
+        if selected_parser is None:
+            selected_parser = self.get("generic")
+            if not matched_parsers:
+                matched_parsers.append(selected_parser.parser_name)
+
+        return ParserResolution(
+            selected_parser=selected_parser,
+            matched_parsers=matched_parsers,
+        )
+
+    def resolve(
+        self,
+        text: str,
+        file_path: str | Path | None = None,
+        parser_name: str | None = None,
+    ) -> BaseInvoiceParser:
+        return self.evaluate(
+            text=text,
+            file_path=file_path,
+            parser_name=parser_name,
+        ).selected_parser
 
 
 _registry: ParserRegistry | None = None
@@ -86,6 +124,18 @@ def resolve_parser(
     parser_name: str | None = None,
 ) -> BaseInvoiceParser:
     return get_parser_registry().resolve(
+        text=text,
+        file_path=file_path,
+        parser_name=parser_name,
+    )
+
+
+def resolve_parser_with_trace(
+    text: str,
+    file_path: str | Path | None = None,
+    parser_name: str | None = None,
+) -> ParserResolution:
+    return get_parser_registry().evaluate(
         text=text,
         file_path=file_path,
         parser_name=parser_name,

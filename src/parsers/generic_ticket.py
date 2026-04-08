@@ -23,30 +23,58 @@ TICKET_MONTHS = {
     "dic": "diciembre",
 }
 
+STRONG_TICKET_PATTERNS = (
+    re.compile(r"factura\s+simplificada", re.IGNORECASE),
+    re.compile(r"\bsala-mesa\b", re.IGNORECASE),
+    re.compile(r"\bn[ºo]\s*op\.?\b", re.IGNORECASE),
+    re.compile(r"\bn[ºo]\s*operaci[oó]n\b", re.IGNORECASE),
+    re.compile(r"\bticket\b", re.IGNORECASE),
+)
+
+SUPPORT_TICKET_PATTERNS = (
+    re.compile(r"\bidentificador\b", re.IGNORECASE),
+    re.compile(r"impuestos\s+incluidos", re.IGNORECASE),
+    re.compile(r"\befectivo\b", re.IGNORECASE),
+    re.compile(r"\bentregado\b", re.IGNORECASE),
+    re.compile(r"\bcambio\b", re.IGNORECASE),
+)
+
+TOTAL_LINE_PATTERN = re.compile(
+    r"\btotal\b[^\n\r:]*[: ]+\d+(?:[.,]\d{2})?",
+    re.IGNORECASE,
+)
+
+DATE_PATTERN = re.compile(
+    r"\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b",
+    re.IGNORECASE,
+)
+
 
 class GenericTicketInvoiceParser(BaseInvoiceParser):
     parser_name = "generic_ticket"
     priority = 200
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
-        normalized_text = text.lower()
         path_text = self.get_path_text(file_path)
-
-        ticket_clues = (
-            "factura simplificada",
-            "ticket",
-            "impuestos incluidos",
-            "nº op",
-            "nºop",
-            "no op",
-            "identificador",
-            "sala-mesa",
-        )
 
         if "/tickets/" in path_text or path_text.endswith("/tickets") or "/ticket/" in path_text:
             return True
 
-        return any(clue in normalized_text for clue in ticket_clues)
+        strong_matches = sum(1 for pattern in STRONG_TICKET_PATTERNS if pattern.search(text))
+        support_matches = sum(1 for pattern in SUPPORT_TICKET_PATTERNS if pattern.search(text))
+        has_total_line = TOTAL_LINE_PATTERN.search(text) is not None
+        has_date = DATE_PATTERN.search(text) is not None
+
+        if strong_matches >= 2:
+            return True
+
+        if strong_matches >= 1 and support_matches >= 1 and has_total_line:
+            return True
+
+        if strong_matches >= 1 and has_total_line and has_date:
+            return True
+
+        return False
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         lines = self.extract_lines(text)

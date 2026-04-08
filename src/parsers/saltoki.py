@@ -47,11 +47,24 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         normalized_text = text.lower()
+        score = 0
 
         if self.matches_file_path_hint(file_path, ("saltoki",)):
-            return True
+            score += 1
 
-        return "saltoki" in normalized_text or "saltoki.es" in normalized_text
+        if "saltoki" in normalized_text:
+            score += 2
+
+        if "saltoki.es" in normalized_text:
+            score += 1
+
+        if any(marker in normalized_text for marker in ("saltoki alicante", "saltoki benidorm")):
+            score += 1
+
+        if any(marker in normalized_text for marker in (self.ALICANTE_SUPPLIER_TAX_ID.lower(), self.BENIDORM_SUPPLIER_TAX_ID.lower())):
+            score += 2
+
+        return score >= 2
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         result = self.build_result(text, file_path)

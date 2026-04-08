@@ -6,7 +6,7 @@ from pathlib import Path
 from config.settings import get_settings
 from src.db.models import InvoiceUpsertData
 from src.db.repositories import InvoiceRepository
-from src.parsers.registry import resolve_parser
+from src.parsers.registry import resolve_parser_with_trace
 from src.pdf.ocr import has_meaningful_text
 from src.pdf.reader import read_pdf_text
 from src.utils.files import list_pdf_files
@@ -74,6 +74,17 @@ class InvoiceScanner:
 
         return "factura"
 
+    def _infer_document_type_from_parser(
+        self,
+        parser_name: str,
+        pdf_path: Path,
+        folder_origin: str | None,
+    ) -> str:
+        if "ticket" in parser_name.lower():
+            return "ticket"
+
+        return self._infer_document_type(pdf_path, folder_origin)
+
     def _apply_default_customer_context(
         self,
         upsert_data: InvoiceUpsertData,
@@ -86,9 +97,6 @@ class InvoiceScanner:
         if not self.settings.force_default_customer_for_facturas:
             return
 
-        # Solo aplicamos este contexto en escaneos por subcarpetas reales
-        # (caso Dani por proveedor). No debe afectar a facturas genéricas
-        # en la raíz ni a tests unitarios con PDFs sueltos.
         if folder_origin is None or str(folder_origin).strip() == "":
             return
 
@@ -132,14 +140,12 @@ class InvoiceScanner:
 
                 existed_before = self.repository.exists_by_hash(file_hash)
                 folder_origin = self._build_folder_origin(pdf_path, scan_dir)
-                document_type = self._infer_document_type(pdf_path, folder_origin)
 
                 result_info = self._process_file(
                     pdf_path=pdf_path,
                     file_hash=file_hash,
                     parser_name=parser_name,
                     folder_origin=folder_origin,
-                    document_type=document_type,
                 )
 
                 invoice_id = result_info["invoice_id"]
@@ -177,14 +183,12 @@ class InvoiceScanner:
         path = Path(pdf_path).resolve()
         file_hash = sha256_file(path)
         folder_origin = path.parent.name or None
-        document_type = self._infer_document_type(path, folder_origin)
 
         result = self._process_file(
             pdf_path=path,
             file_hash=file_hash,
             parser_name=parser_name,
             folder_origin=folder_origin,
-            document_type=document_type,
         )
         return int(result["invoice_id"])
 
@@ -194,7 +198,6 @@ class InvoiceScanner:
         file_hash: str,
         parser_name: str | None = None,
         folder_origin: str | None = None,
-        document_type: str = "factura",
     ) -> dict[str, object]:
         read_result = read_pdf_text(pdf_path)
 
@@ -212,12 +215,18 @@ class InvoiceScanner:
             else:
                 review_reason = "PDF sin texto util. Requiere OCR o revision manual."
 
-        parser = resolve_parser(
+        resolution = resolve_parser_with_trace(
             text=read_result.text,
             file_path=pdf_path,
             parser_name=parser_name,
         )
+        parser = resolution.selected_parser
         parsed = parser.parse(read_result.text, pdf_path).finalize()
+        document_type = self._infer_document_type_from_parser(
+            parser_name=parsed.parser_usado,
+            pdf_path=pdf_path,
+            folder_origin=folder_origin,
+        )
 
         upsert_data = InvoiceUpsertData(
             archivo=parsed.archivo,
@@ -252,4 +261,6 @@ class InvoiceScanner:
         return {
             "invoice_id": invoice_id,
             "requires_review": requires_review,
+            "matched_parsers": resolution.matched_parsers,
+            "document_type": document_type,
         }

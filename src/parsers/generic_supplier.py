@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from src.parsers.base import BaseInvoiceParser, ParsedInvoiceData
+
+TICKETISH_PATTERNS = (
+    re.compile(r"factura\s+simplificada", re.IGNORECASE),
+    re.compile(r"\bsala-mesa\b", re.IGNORECASE),
+    re.compile(r"\bn[ºo]\s*op\.?\b", re.IGNORECASE),
+    re.compile(r"\bn[ºo]\s*operaci[oó]n\b", re.IGNORECASE),
+)
 
 
 class GenericSupplierInvoiceParser(BaseInvoiceParser):
@@ -13,20 +21,41 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
         path_hint = self.get_folder_hint_name(file_path)
         normalized_text = text.lower()
 
-        if path_hint and path_hint.lower() not in {"inbox", "data", "tickets"}:
-            if any(token in normalized_text for token in ("factura", "base imponible", "iva", "total")):
-                return True
+        if self._looks_like_ticket(text):
+            return False
 
-        supplier_markers = (
+        structural_markers = (
             "proveedor",
             "emisor",
             "razón social",
             "razon social",
+            "datos del proveedor",
+            "datos del emisor",
+        )
+        invoice_markers = (
             "base imponible",
+            "cuota iva",
+            "importe iva",
+            "importe total",
+            "total factura",
             "nº factura",
             "número de factura",
         )
-        return any(marker in normalized_text for marker in supplier_markers)
+
+        structural_hits = sum(1 for marker in structural_markers if marker in normalized_text)
+        invoice_hits = sum(1 for marker in invoice_markers if marker in normalized_text)
+
+        if structural_hits >= 1:
+            return True
+
+        if invoice_hits >= 2:
+            return True
+
+        if path_hint and path_hint.lower() not in {"inbox", "data", "tickets"}:
+            if structural_hits >= 1 or invoice_hits >= 2:
+                return True
+
+        return False
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         lines = self.extract_lines(text)
@@ -64,7 +93,10 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
             return top_provider
 
         folder_hint = self.get_folder_hint_name(file_path)
-        if folder_hint:
+        if folder_hint and folder_hint.lower() not in {"inbox", "data", "tickets"}:
             return folder_hint
 
         return None
+
+    def _looks_like_ticket(self, text: str) -> bool:
+        return any(pattern.search(text) for pattern in TICKETISH_PATTERNS)
