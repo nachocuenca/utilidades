@@ -12,6 +12,7 @@ from src.utils.ids import extract_postal_codes, normalize_postal_code, normalize
 from src.utils.names import clean_name_candidate, is_valid_name_candidate, pick_best_name
 
 AMOUNT_CAPTURE_PATTERN = r"([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{1,4})?)"
+AMOUNT_CAPTURE_REGEX = re.compile(AMOUNT_CAPTURE_PATTERN)
 EXACT_TAX_ID_PATTERN = re.compile(
     r"(?<![A-Z0-9])(?:ES)?([A-Z]\d{8}|\d{8}[A-Z]|[XYZ]\d{7}[A-Z])(?![A-Z0-9])",
     re.IGNORECASE,
@@ -29,7 +30,36 @@ INVALID_INVOICE_NUMBER_VALUES = {
     "numero",
     "número",
     "hoja",
+    "direcci",
+    "direccion",
+    "descripci",
+    "descripcion",
+    "concepto",
+    "referencia",
+    "documento",
 }
+CUSTOMER_LINE_PATTERN = re.compile(
+    r"\b(cliente|clienta|destinatario|facturar a|bill to|comprador|titular)\b",
+    re.IGNORECASE,
+)
+SUMMARY_BASE_LABELS = (
+    "subtotal",
+    "base imponible",
+    "importe sin iva",
+    "total antes de impuestos",
+    "base",
+)
+SUMMARY_IVA_LABELS = (
+    "cuota iva",
+    "importe iva",
+    "iva",
+    "impuesto",
+)
+SUMMARY_TOTAL_LABELS = (
+    "importe total",
+    "total factura",
+    "total",
+)
 
 
 @dataclass(slots=True)
@@ -133,13 +163,17 @@ class BaseInvoiceParser(ABC):
         if cleaned == "":
             return None
 
-        if cleaned.lower() in INVALID_INVOICE_NUMBER_VALUES:
+        lowered = cleaned.lower()
+        if lowered in INVALID_INVOICE_NUMBER_VALUES:
             return None
 
-        if len(cleaned) <= 2 and cleaned.lower() not in {"f1", "f2"}:
+        if len(cleaned) <= 2 and lowered not in {"f1", "f2"}:
             return None
 
-        if cleaned.lower().startswith("fecha"):
+        if lowered.startswith("fecha"):
+            return None
+
+        if re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", cleaned) and not any(character.isdigit() for character in cleaned):
             return None
 
         return cleaned
@@ -247,23 +281,87 @@ class BaseInvoiceParser(ABC):
 
         return None
 
-    def extract_labeled_amount(self, text: str, label_patterns: list[str]) -> float | None:
-        for label_pattern in label_patterns:
-            pattern = re.compile(
-                rf"{label_pattern}\s*[:\-]?\s*{AMOUNT_CAPTURE_PATTERN}",
-                re.IGNORECASE,
-            )
-            match = pattern.search(text)
-            if not match:
+    def extract_amounts_from_fragment(
+        self,
+        fragment: str,
+        *,
+        ignore_percent: bool = False,
+    ) -> list[float]:
+        amounts: list[float] = []
+
+        for match in AMOUNT_CAPTURE_REGEX.finditer(fragment):
+            start, end = match.span(1)
+            surrounding = fragment[max(0, start - 2): min(len(fragment), end + 2)]
+            if ignore_percent and "%" in surrounding:
                 continue
 
             value = parse_amount(match.group(1))
-            if value is not None:
-                return value
+            if value is None:
+                continue
+            amounts.append(value)
+
+        return amounts
+
+    def extract_labeled_amount(self, text: str, label_patterns: list[str], *, ignore_percent: bool = False) -> float | None:
+        for label_pattern in label_patterns:
+            pattern = re.compile(
+                rf"{label_pattern}\s*[:\-]?\s*([^\n\r]*)",
+                re.IGNORECASE,
+            )
+
+            for match in pattern.finditer(text):
+                fragment = match.group(1)
+                values = self.extract_amounts_from_fragment(fragment, ignore_percent=ignore_percent)
+                if not values:
+                    continue
+                return values[-1]
 
         return None
 
+    def extract_summary_amounts(self, text: str) -> tuple[float | None, float | None, float | None]:
+        lines = self.extract_lines(text)
+        if not lines:
+            return None, None, None
+
+        tail_lines = lines[-18:]
+        base_candidates: list[float] = []
+        iva_candidates: list[float] = []
+        total_candidates: list[float] = []
+
+        for line in tail_lines:
+            lowered = line.lower()
+
+            if any(label in lowered for label in SUMMARY_BASE_LABELS):
+                values = self.extract_amounts_from_fragment(line, ignore_percent=True)
+                if values:
+                    base_candidates.append(values[-1])
+
+            if any(label in lowered for label in SUMMARY_IVA_LABELS):
+                values = self.extract_amounts_from_fragment(line, ignore_percent=True)
+                if values:
+                    iva_candidates.append(values[-1])
+
+            if any(label in lowered for label in SUMMARY_TOTAL_LABELS) and "subtotal" not in lowered:
+                values = self.extract_amounts_from_fragment(line)
+                if values:
+                    total_candidates.append(values[-1])
+
+        for total_value in reversed(total_candidates):
+            for base_value in reversed(base_candidates):
+                for iva_value in reversed(iva_candidates):
+                    if abs((base_value + iva_value) - total_value) <= 0.02:
+                        return base_value, iva_value, total_value
+
+        base_value = base_candidates[-1] if base_candidates else None
+        iva_value = iva_candidates[-1] if iva_candidates else None
+        total_value = total_candidates[-1] if total_candidates else None
+        return base_value, iva_value, total_value
+
     def extract_subtotal(self, text: str) -> float | None:
+        summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
+        if summary_base is not None and summary_iva is not None and summary_total is not None:
+            return summary_base
+
         return self.extract_labeled_amount(
             text,
             [
@@ -272,9 +370,14 @@ class BaseInvoiceParser(ABC):
                 r"importe\s+sin\s+iva",
                 r"total\s+antes\s+de\s+impuestos",
             ],
+            ignore_percent=True,
         )
 
     def extract_iva(self, text: str) -> float | None:
+        summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
+        if summary_base is not None and summary_iva is not None and summary_total is not None:
+            return summary_iva
+
         return self.extract_labeled_amount(
             text,
             [
@@ -282,9 +385,14 @@ class BaseInvoiceParser(ABC):
                 r"importe\s+iva",
                 r"\biva\b",
             ],
+            ignore_percent=True,
         )
 
     def extract_total(self, text: str) -> float | None:
+        summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
+        if summary_base is not None and summary_iva is not None and summary_total is not None:
+            return summary_total
+
         return self.extract_labeled_amount(
             text,
             [
@@ -318,6 +426,13 @@ class BaseInvoiceParser(ABC):
         return candidates[0] if candidates else None
 
     def extract_supplier_tax_id(self, text: str) -> str | None:
+        lines = self.extract_lines(text)
+        customer_tax_ids: set[str] = set()
+
+        for line in lines:
+            if CUSTOMER_LINE_PATTERN.search(line):
+                customer_tax_ids.update(self.extract_exact_tax_ids(line))
+
         label_patterns = [
             r"(?:cif|nif)\s*(?:proveedor|emisor|empresa|raz[oó]n\s+social)?\s*[:\-]?\s*([^\n\r]+)",
             r"(?:proveedor|emisor|empresa|raz[oó]n\s+social)\s*[:\-]?\s*([^\n\r]{0,120})",
@@ -329,16 +444,18 @@ class BaseInvoiceParser(ABC):
                 continue
 
             line_fragment = match.group(1)
-            candidates = self.extract_exact_tax_ids(line_fragment)
+            candidates = [candidate for candidate in self.extract_exact_tax_ids(line_fragment) if candidate not in customer_tax_ids]
             if candidates:
                 return candidates[0]
 
-        top_text = "\n".join(self.extract_lines(text)[:12])
-        top_candidates = self.extract_exact_tax_ids(top_text)
-        if top_candidates:
-            return top_candidates[0]
+        for line in lines[:12]:
+            if CUSTOMER_LINE_PATTERN.search(line):
+                continue
+            candidates = [candidate for candidate in self.extract_exact_tax_ids(line) if candidate not in customer_tax_ids]
+            if candidates:
+                return candidates[0]
 
-        all_candidates = self.extract_exact_tax_ids(text)
+        all_candidates = [candidate for candidate in self.extract_exact_tax_ids(text) if candidate not in customer_tax_ids]
         return all_candidates[0] if all_candidates else None
 
     def extract_postal_code_from_text(self, text: str) -> str | None:
@@ -395,8 +512,22 @@ class BaseInvoiceParser(ABC):
             re.compile(r"cliente", re.IGNORECASE),
             re.compile(r"fecha", re.IGNORECASE),
             re.compile(r"hoja", re.IGNORECASE),
+            re.compile(r"subtotal", re.IGNORECASE),
+            re.compile(r"base", re.IGNORECASE),
+            re.compile(r"iva", re.IGNORECASE),
+            re.compile(r"total", re.IGNORECASE),
             re.compile(r"www\.", re.IGNORECASE),
             re.compile(r"^c/", re.IGNORECASE),
+            re.compile(r"referencia", re.IGNORECASE),
+            re.compile(r"normativa vigente", re.IGNORECASE),
+            re.compile(r"empresa emisora", re.IGNORECASE),
+            re.compile(r"siempre cerca", re.IGNORECASE),
+            re.compile(r"bricolaje", re.IGNORECASE),
+            re.compile(r"construcci[oó]n", re.IGNORECASE),
+            re.compile(r"decoraci[oó]n", re.IGNORECASE),
+            re.compile(r"jardiner[ií]a", re.IGNORECASE),
+            re.compile(r"otnemucod", re.IGNORECASE),
+            re.compile(r"n[oó]icpircsn[ií]", re.IGNORECASE),
         ]
 
         for line in lines[:top_n]:
