@@ -76,7 +76,7 @@ with search_col:
     )
     st.session_state["invoice_search"] = search
 
-tipo_options = ["todos", "factura", "ticket"]
+tipo_options = ["todos", "factura", "ticket", "no_fiscal"]
 with tipo_col:
     selected_document_type = st.selectbox(
         "Tipo",
@@ -177,7 +177,7 @@ render_scan_summary(st.session_state.get("last_scan_summary"))
 
 dataframe = service.list_invoices_dataframe(
     search=search or None,
-    visible_only=True,
+    visible_only=False,
     tipo_documento=document_type_filter,
 )
 
@@ -193,6 +193,9 @@ else:
         use_container_width=True,
         hide_index=True,
         column_config={
+            "tipo_documento": "Tipo",
+            "parser_usado": "Parser",
+            "requiere_revision_manual": st.column_config.CheckboxColumn("Revisión"),
             "nombre_proveedor": "Nombre proveedor",
             "nif_proveedor": "NIF proveedor",
             "numero_factura": "Número factura",
@@ -202,6 +205,10 @@ else:
             "total": st.column_config.NumberColumn("Total", format="%.2f"),
             "nombre_cliente": "Nombre cliente",
             "nif_cliente": "NIF cliente",
+            "motivo_revision": "Motivo revisión",
+            "carpeta_origen": "Carpeta origen",
+            "archivo": "Archivo",
+            "extractor_origen": "Extractor",
         },
     )
 

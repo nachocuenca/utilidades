@@ -34,6 +34,71 @@ class ScanSummary:
 
 
 class InvoiceScanner:
+    NON_FISCAL_FOLDER_HINTS = {
+        "tgss",
+        "seguridad social",
+        "seguridad_social",
+        "banco",
+        "bancos",
+        "bancario",
+        "bancarios",
+        "recibos",
+        "recibos banco",
+        "recibos bancarios",
+        "no fiscal",
+        "no_fiscal",
+        "administrativo",
+        "administrativos",
+    }
+
+    TGSS_STRONG_MARKERS = (
+        "tesorería general de la seguridad social",
+        "tesoreria general de la seguridad social",
+        "seguridad social",
+        "recibo de liquidación de cotizaciones",
+        "recibo de liquidacion de cotizaciones",
+        "relación nominal de trabajadores",
+        "relacion nominal de trabajadores",
+        "sistema red",
+        "tc1",
+        "rnt",
+        "rlt",
+    )
+
+    BANK_RECEIPT_STRONG_MARKERS = (
+        "titular de la domiciliación",
+        "titular de la domiciliacion",
+        "entidad emisora",
+        "adeudo por domiciliación",
+        "adeudo por domiciliacion",
+        "domiciliación bancaria",
+        "domiciliacion bancaria",
+        "recibo bancario",
+        "cargo en cuenta",
+    )
+
+    BANK_RECEIPT_SUPPORT_MARKERS = (
+        "iban",
+        "ccc",
+        "bic",
+        "sepa",
+        "cuenta de cargo",
+        "fecha cargo",
+        "importe adeudado",
+        "referencia del adeudo",
+    )
+
+    FISCAL_MARKERS = (
+        "base imponible",
+        "cuota iva",
+        "importe iva",
+        "total factura",
+        "número de factura",
+        "numero de factura",
+        "nº factura",
+        "factura simplificada",
+    )
+
     def __init__(
         self,
         repository: InvoiceRepository | None = None,
@@ -65,12 +130,63 @@ class InvoiceScanner:
 
         return relative_parent.as_posix()
 
-    def _infer_document_type(self, pdf_path: Path, folder_origin: str | None) -> str:
+    def _normalize_text(self, text: str) -> str:
+        return " ".join((text or "").replace("\r", "\n").split()).lower()
+
+    def _looks_like_non_fiscal_document(
+        self,
+        text: str,
+        pdf_path: Path,
+        folder_origin: str | None,
+    ) -> bool:
+        normalized_text = self._normalize_text(text)
+        path_text = str(pdf_path).replace("\\", "/").lower()
+        folder_text = (folder_origin or "").replace("\\", "/").lower().strip()
+
+        folder_tokens = {token.strip() for token in folder_text.split("/") if token.strip()}
+        if folder_tokens & self.NON_FISCAL_FOLDER_HINTS:
+            return True
+
+        if any(marker in normalized_text for marker in self.TGSS_STRONG_MARKERS):
+            fiscal_hits = sum(1 for marker in self.FISCAL_MARKERS if marker in normalized_text)
+            if fiscal_hits == 0:
+                return True
+
+        bank_strong_hits = sum(1 for marker in self.BANK_RECEIPT_STRONG_MARKERS if marker in normalized_text)
+        bank_support_hits = sum(1 for marker in self.BANK_RECEIPT_SUPPORT_MARKERS if marker in normalized_text)
+        fiscal_hits = sum(1 for marker in self.FISCAL_MARKERS if marker in normalized_text)
+
+        if bank_strong_hits >= 2 and fiscal_hits == 0:
+            return True
+
+        if bank_strong_hits >= 1 and bank_support_hits >= 2 and fiscal_hits == 0:
+            return True
+
+        if "recibos seguridad social" in normalized_text and fiscal_hits == 0:
+            return True
+
+        if (
+            "titular de la domiciliación" in normalized_text
+            or "titular de la domiciliacion" in normalized_text
+        ) and "entidad emisora" in normalized_text and fiscal_hits == 0:
+            return True
+
+        return False
+
+    def _infer_document_type(
+        self,
+        pdf_path: Path,
+        folder_origin: str | None,
+        text: str,
+    ) -> str:
         path_text = str(pdf_path).replace("\\", "/").lower()
         folder_text = (folder_origin or "").lower()
 
         if "/tickets/" in path_text or folder_text == "tickets" or folder_text.startswith("tickets/"):
             return "ticket"
+
+        if self._looks_like_non_fiscal_document(text, pdf_path, folder_origin):
+            return "no_fiscal"
 
         return "factura"
 
@@ -79,11 +195,15 @@ class InvoiceScanner:
         parser_name: str,
         pdf_path: Path,
         folder_origin: str | None,
+        text: str,
     ) -> str:
         if "ticket" in parser_name.lower():
             return "ticket"
 
-        return self._infer_document_type(pdf_path, folder_origin)
+        if parser_name == "document_filter":
+            return self._infer_document_type(pdf_path, folder_origin, text)
+
+        return self._infer_document_type(pdf_path, folder_origin, text)
 
     def _apply_default_customer_context(
         self,
@@ -97,17 +217,16 @@ class InvoiceScanner:
         if not self.settings.force_default_customer_for_facturas:
             return
 
-        # Si se escanea directamente una carpeta de proveedor como raíz,
-        # folder_origin puede venir vacío y aun así seguimos queriendo aplicar
-        # el cliente Dani por defecto a las facturas.
+        if folder_origin is None or str(folder_origin).strip() == "":
+            return
 
         default_name = self.settings.default_customer_name.strip()
         default_tax_id = self.settings.default_customer_tax_id.strip()
 
-        if default_name and not upsert_data.nombre_cliente:
+        if default_name:
             upsert_data.nombre_cliente = default_name
 
-        if default_tax_id and not upsert_data.nif_cliente:
+        if default_tax_id:
             upsert_data.nif_cliente = default_tax_id
 
     def scan(
@@ -216,6 +335,40 @@ class InvoiceScanner:
             else:
                 review_reason = "PDF sin texto util. Requiere OCR o revision manual."
 
+        pre_document_type = self._infer_document_type(
+            pdf_path=pdf_path,
+            folder_origin=folder_origin,
+            text=read_result.text,
+        )
+
+        if pre_document_type == "no_fiscal":
+            non_fiscal_reason = "Documento detectado como no fiscal (recibo bancario, TGSS o administrativo)."
+            if review_reason:
+                review_reason = f"{review_reason} {non_fiscal_reason}"
+            else:
+                review_reason = non_fiscal_reason
+
+            upsert_data = InvoiceUpsertData(
+                archivo=pdf_path.name,
+                ruta_archivo=str(pdf_path.resolve()),
+                hash_archivo=file_hash,
+                tipo_documento="no_fiscal",
+                parser_usado="document_filter",
+                extractor_origen=read_result.extractor,
+                requiere_revision_manual=True,
+                motivo_revision=review_reason,
+                carpeta_origen=folder_origin,
+                texto_crudo=read_result.text,
+            )
+
+            invoice_id = self.repository.upsert(upsert_data)
+            return {
+                "invoice_id": invoice_id,
+                "requires_review": True,
+                "matched_parsers": ["document_filter"],
+                "document_type": "no_fiscal",
+            }
+
         resolution = resolve_parser_with_trace(
             text=read_result.text,
             file_path=pdf_path,
@@ -227,6 +380,7 @@ class InvoiceScanner:
             parser_name=parsed.parser_usado,
             pdf_path=pdf_path,
             folder_origin=folder_origin,
+            text=read_result.text,
         )
 
         upsert_data = InvoiceUpsertData(
