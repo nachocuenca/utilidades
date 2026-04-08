@@ -2,98 +2,54 @@
 
 ## Objetivo
 
-Esta utilidad procesa facturas PDF desde una carpeta local, extrae informacion clave, la guarda en SQLite y la muestra en una interfaz local en Streamlit.
+Procesa PDFs → texto → parser → datos normalizados → SQLite → UI/export.
 
-## Capas del proyecto
+## Capas
 
-### 1. Configuracion
-- `config/settings.py`
-- Carga `.env`
-- Resuelve rutas locales
-- Garantiza que existan directorios de trabajo
+### 1. Configuración
+`config/settings.py`: .env, rutas, OCR toggle, default_parser=\"generic\".
 
 ### 2. Base de datos
-- `src/db/database.py`
-- `src/db/models.py`
-- `src/db/repositories.py`
+`src/db/*`: SQLite facturas (hash_archivo PK, upsert, filtros fecha/parser).
 
-Responsabilidades:
-- crear esquema SQLite
-- abrir conexiones
-- persistir y consultar facturas
-- exponer una capa simple para el resto de la app
+### 3. Utils/PDF
+`src/utils/*`, `src/pdf/*`: Normaliza fechas/importes/nombres/NIF, lee/limpia texto.
 
-### 3. Utilidades y lectura de PDF
-- `src/utils/*`
-- `src/pdf/*`
+### 4. Parsers **(actualizado hoy)**
+`src/parsers/*`:
 
-Responsabilidades:
-- normalizar importes
-- normalizar fechas
-- limpiar NIF/CIF
-- detectar codigos postales
-- leer texto de PDFs
-- limpiar texto crudo para parsers
-
-### 4. Parsers
-- `src/parsers/base.py`
-- `src/parsers/registry.py`
-- `src/parsers/generic.py`
-- `src/parsers/maria.py`
-- `src/parsers/agus.py`
-
-Responsabilidades:
-- decidir que parser aplica
-- extraer campos de negocio
-- encapsular logica especifica por emisor
-- dejar desacoplada la evolucion futura
+- Registry `registry.py`: Priority descendente (Obramat>Saltoki>Repsol>Edieuropa>Mercaluz>generic_ticket60>Maria/Agus>generic_supplier20>generic).
+- `resolve_with_trace()`: selected + matched_parsers para debug.
+- Base: Estructura salida, helpers.
+- Específicos: Alta prio por texto/path (ej. mercaluz NIF/A BV).
+- generic_ticket: Strict tickets (patterns + !largo/!OCR/!NIF muchos).
+- generic_supplier: Facturas genéricas (fiscal markers).
+- generic: Fallback.
 
 ### 5. Servicios
-- `src/services/scanner.py`
-- `src/services/exporter.py`
-- `src/services/invoice_service.py`
+`src/services/scanner.py`: Lista PDFs, read_text, resolve_parser, infer tipo_doc (\"ticket\" si generic_ticket), upsert.
+Otros: export CSV/XLSX.
 
-Responsabilidades:
-- coordinar lectura de PDFs
-- resolver parser
-- guardar resultados
-- exportar CSV y XLSX
-- exponer operaciones listas para UI y scripts
-
-### 6. Interfaz local
-- `app.py`
-- `src/ui/components.py`
-- `src/ui/pages/*`
-
-Responsabilidades:
-- mostrar tabla de facturas
-- buscar y filtrar
-- reescanear carpeta
-- abrir detalle
-- descargar exportaciones
+### 6. UI
+`app.py` + `src/ui/*`: Tabla facturas, filtros, detalle texto_crudo/requiere_revision, reescaneo.
 
 ## Flujo principal
 
-1. El usuario deja PDFs en `data/inbox/`
-2. El escaner lista archivos PDF
-3. Se lee el texto del PDF
-4. El registry resuelve el parser adecuado
-5. El parser devuelve datos normalizados
-6. El repositorio hace upsert en SQLite
-7. Streamlit muestra y exporta resultados
+1. PDFs en `data/inbox/`.
+2. Scanner: read_pdf_text → registry.evaluate(text, path) → parse() → upsert.
+3. UI: Query repo → render/export.
+4. Scripts: `rescan.py` CLI.
 
-## Criterios de diseno
+## Extensiones
 
-- local first
-- sin sobrearquitectura web
-- SQLite para persistencia simple
-- parsers desacoplados por emisor
-- texto crudo guardado para depuracion
-- estructura clara para GitHub y mantenimiento
+- Nuevo parser: Hereda Base, register(), test fixture.
+- Debug: `resolve_parser_with_trace()` logs matched.
+- Ver `docs/parsers.md` cambios/estado detallado.
 
-## Puntos de extension
+## Diseño
 
-- nuevos parsers en `src/parsers/`
-- reglas nuevas de nombres, importes o fechas en `src/utils/`
-- nuevos filtros o acciones de UI en `src/ui/`
-- exportaciones adicionales en `src/services/exporter.py`
+- Local/SQLite.
+- Parsers desacoplados.
+- Texto_crudo para debug.
+- Tests por parser + fixtures reales.
+
