@@ -52,26 +52,35 @@ DATE_PATTERN = re.compile(
 
 class GenericTicketInvoiceParser(BaseInvoiceParser):
     parser_name = "generic_ticket"
-    priority = 200
+    priority = 60  # Entre GenericSupplier(20) y Maria(100)/Agus(80), reduce solapes
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         path_text = self.get_path_text(file_path)
 
+        # Path tickets siempre
         if "/tickets/" in path_text or path_text.endswith("/tickets") or "/ticket/" in path_text:
             return True
+
+        lines = self.extract_lines(text)
+        line_count = len(lines)
+
+        # Tickets cortos OR listados largos
+        is_short_ticket = line_count < 50
+        has_many_totals = sum(1 for line in lines if TOTAL_LINE_PATTERN.search(line)) > 10
+
+        if not (is_short_ticket or has_many_totals):
+            return False
 
         strong_matches = sum(1 for pattern in STRONG_TICKET_PATTERNS if pattern.search(text))
         support_matches = sum(1 for pattern in SUPPORT_TICKET_PATTERNS if pattern.search(text))
         has_total_line = TOTAL_LINE_PATTERN.search(text) is not None
         has_date = DATE_PATTERN.search(text) is not None
 
+        # Más estricto: strong >=2 OR (strong+support+total+date)
         if strong_matches >= 2:
             return True
 
-        if strong_matches >= 1 and support_matches >= 1 and has_total_line:
-            return True
-
-        if strong_matches >= 1 and has_total_line and has_date:
+        if strong_matches >= 1 and support_matches >= 1 and has_total_line and has_date:
             return True
 
         return False

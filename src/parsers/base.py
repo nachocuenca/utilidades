@@ -57,6 +57,37 @@ CUSTOMER_LINE_PATTERN = re.compile(
     r"\b(cliente|clienta|destinatario|facturar a|bill to|comprador|titular)\b",
     re.IGNORECASE,
 )
+STRONG_TICKET_PATTERNS = (
+    re.compile(r"factura\s+simplificada", re.IGNORECASE),
+    re.compile(r"\bsala-mesa\b", re.IGNORECASE),
+    re.compile(r"\bn[ºo]\s*op\.?\b", re.IGNORECASE),
+    re.compile(r"\bn[ºo]\s*operaci[oó]n\b", re.IGNORECASE),
+    re.compile(r"\bticket\b", re.IGNORECASE),
+)
+SUPPORT_TICKET_PATTERNS = (
+    re.compile(r"\bidentificador\b", re.IGNORECASE),
+    re.compile(r"impuestos\s+incluidos", re.IGNORECASE),
+    re.compile(r"\befectivo\b", re.IGNORECASE),
+    re.compile(r"\bentregado\b", re.IGNORECASE),
+    re.compile(r"\bcambio\b", re.IGNORECASE),
+)
+TOTAL_LINE_PATTERN = re.compile(
+    r"\btotal\b[^\n\r:]*[: ]+\d+(?:[.,]\d{2})?",
+    re.IGNORECASE,
+)
+DATE_PATTERN = re.compile(
+    r"\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b",
+    re.IGNORECASE,
+)
+INVOICE_FISCAL_MARKERS = (
+    "factura",
+    "base imponible",
+    "cuota iva",
+    "importe iva",
+    "total factura",
+    "número de factura",
+    "nº factura",
+)
 SUMMARY_BASE_LABELS = (
     "subtotal",
     "base imponible",
@@ -600,3 +631,35 @@ class BaseInvoiceParser(ABC):
                 candidates.append(cleaned)
 
         return pick_best_name(candidates)
+
+    def looks_like_ticket_document(self, text: str, file_path: str | Path | None = None) -> bool:
+        path_text = self.get_path_text(file_path)
+        if "/tickets/" in path_text or path_text.endswith("/tickets") or "/ticket/" in path_text:
+            return True
+
+        lines = self.extract_lines(text)
+        line_count = len(lines)
+
+        # Stricter: corto OR muchos totales/productos listados
+        is_short_ticket = line_count < 50
+        has_many_totals = sum(1 for line in lines if TOTAL_LINE_PATTERN.search(line)) > 10
+        if not (is_short_ticket or has_many_totals):
+            return False
+
+        strong_matches = sum(1 for pattern in STRONG_TICKET_PATTERNS if pattern.search(text))
+        support_matches = sum(1 for pattern in SUPPORT_TICKET_PATTERNS if pattern.search(text))
+        has_total_line = TOTAL_LINE_PATTERN.search(text) is not None
+        has_date = DATE_PATTERN.search(text) is not None
+
+        if strong_matches >= 2:
+            return True
+
+        if strong_matches >= 1 and support_matches >= 1 and has_total_line and has_date:
+            return True
+
+        return False
+
+    def looks_like_invoice_document(self, text: str) -> bool:
+        normalized = text.lower()
+        marker_hits = sum(1 for marker in INVOICE_FISCAL_MARKERS if marker in normalized)
+        return marker_hits >= 2

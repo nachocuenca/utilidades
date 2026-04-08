@@ -32,11 +32,14 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
     priority = 20
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
+        if BaseInvoiceParser().looks_like_ticket_document(text, file_path):
+            return False
+
+        if not BaseInvoiceParser().looks_like_invoice_document(text):
+            return False
+
         path_hint = self.get_folder_hint_name(file_path)
         normalized_text = text.lower()
-
-        if self._looks_like_ticket(text):
-            return False
 
         structural_markers = (
             "proveedor",
@@ -149,5 +152,3 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
 
         return None
 
-    def _looks_like_ticket(self, text: str) -> bool:
-        return any(pattern.search(text) for pattern in TICKETISH_PATTERNS)
