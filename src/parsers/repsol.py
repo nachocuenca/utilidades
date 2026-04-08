@@ -46,6 +46,7 @@ EMITTED_IN_NAME_OF_PATTERN = re.compile(
     r"emitida\s+en\s+nombre\s+y\s+por\s+cuenta\s+de",
     re.IGNORECASE,
 )
+EMITTED_IN_NAME_OF_COMPACT = "emitidaennombreyporcuentade"
 
 TAX_ID_PATTERNS = (
     re.compile(r"C\.?I\.?F\.?\s*[:.]?\s*([A-Z]-?\d{8})", re.IGNORECASE),
@@ -172,27 +173,41 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
         normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
         return re.sub(r"\s+", " ", normalized).strip()
 
+    def _compact_repsol_lookup_text(self, value: str) -> str:
+        return self._normalize_repsol_lookup_text(value).replace(" ", "")
+
     def _extract_emitted_billing_fragment(self, text: str) -> str | None:
-        ascii_text = self._strip_accents(text)
+        repaired_text = self._repair_common_mojibake(text)
+        ascii_text = self._strip_accents(repaired_text)
         match = EMITTED_IN_NAME_OF_PATTERN.search(ascii_text)
-        if not match:
+        if match:
+            start = match.start()
+            end = min(len(repaired_text), start + 800)
+            return repaired_text[start:end]
+
+        compact_text = self._compact_repsol_lookup_text(repaired_text)
+        compact_start = compact_text.find(EMITTED_IN_NAME_OF_COMPACT)
+        if compact_start < 0:
             return None
 
-        start = match.start()
-        end = min(len(text), start + 800)
-        return text[start:end]
+        compact_fragment = compact_text[compact_start: compact_start + 800]
+        return compact_fragment
 
     def _match_known_repsol_company(self, text: str) -> tuple[str, str] | None:
         lookup_text = self._normalize_repsol_lookup_text(text)
-        if not lookup_text:
+        compact_text = lookup_text.replace(" ", "")
+        if not compact_text:
             return None
 
         best_match: tuple[int, str, str] | None = None
 
         for needle, company_name, tax_id in KNOWN_REPSOL_COMPANIES:
-            position = lookup_text.find(needle)
-            if position < 0:
+            compact_needle = needle.replace(" ", "")
+            positions = [pos for pos in (lookup_text.find(needle), compact_text.find(compact_needle)) if pos >= 0]
+            if not positions:
                 continue
+
+            position = min(positions)
 
             if best_match is None or position < best_match[0]:
                 best_match = (position, company_name, tax_id)

@@ -10,6 +10,9 @@ from src.parsers.eseaforms import EseaformsInvoiceParser
 from src.parsers.generic import GenericInvoiceParser
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 from src.parsers.generic_ticket import GenericTicketInvoiceParser
+from src.parsers.legal_quality import LegalQualityInvoiceParser
+from src.parsers.levantia import LevantiaInvoiceParser
+from src.parsers.leroy_merlin import LeroyMerlinInvoiceParser
 from src.parsers.maria import MariaInvoiceParser
 from src.parsers.mercaluz import MercaluzInvoiceParser
 from src.parsers.obramat import ObramatInvoiceParser
@@ -32,10 +35,13 @@ class ParserRegistry:
         # Específicos alta prioridad
         self.register(ObramatInvoiceParser())
         self.register(SaltokiInvoiceParser())
+        self.register(LeroyMerlinInvoiceParser())
         self.register(RepsolInvoiceParser())
         self.register(EseaformsInvoiceParser())
         self.register(EdieuropaInvoiceParser())
+        self.register(LegalQualityInvoiceParser())
         self.register(MercaluzInvoiceParser())
+        self.register(LevantiaInvoiceParser())
 
         # Ticket genérico
         self.register(GenericTicketInvoiceParser())

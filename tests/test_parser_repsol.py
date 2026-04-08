@@ -168,6 +168,29 @@ Datos Fiscales Adquiriente CUENCA MOYA DANIEL (CIF/NIF: 48334490J)"""
     assert tax_id is None
 
 
+def test_repsol_compact_ocr_tail_still_resolves_facturadora_real() -> None:
+    text = """NºFactura:096943/5/26/000169
+Fecha:09/01/2026
+DatosFiscalesAdquirienteCUENCAMOYADANIEL(CIF/NIF:48334490J)
+Datosdelsuministro
+Importedelproducto(BaseImponible)62,60€
+IVA21,00%de62,60€13,15€
+TOTALFACTURAEUROS........75,75€
+(*)EstafacturaestáemitidaennombreyporcuentadeRepsolSolucionesEnergéticas,S.A.
+RepsolSolucionesEnergéticas,S.A.MéndezAlvaro,44.Madrid28045
+RegistroMercantildeMadrid,Tomo2530gral,Folio1,HojaM-44194,incr665C.I.F.A-80298839"""
+
+    result = RepsolInvoiceParser().parse(text, Path(r"C:\temp\repsol\09_01 75,75 €.pdf"))
+
+    assert result.nombre_proveedor == "Repsol Soluciones Energéticas, S.A."
+    assert result.nif_proveedor == "A80298839"
+    assert result.numero_factura == "096943/5/26/000169"
+    assert result.fecha_factura == "09-01-2026"
+    assert result.subtotal == 62.6
+    assert result.iva == 13.15
+    assert result.total == 75.75
+
+
 def test_repsol_2026_real_facturadora_0901() -> None:
     text = """Nº Factura: 096943/5/26/000169
 Fecha: 09/01/2026
