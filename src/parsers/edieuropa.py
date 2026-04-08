@@ -5,6 +5,7 @@ import re
 from typing import Optional
 
 from src.parsers.base import BaseInvoiceParser, ParsedInvoiceData
+from src.utils.amounts import parse_amount
 
 
 class EdieuropaInvoiceParser(BaseInvoiceParser):
@@ -29,13 +30,12 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         normalized_text = text.lower()
+        if "edieuropa" not in normalized_text and "edi europa" not in normalized_text:
+            return False
         score = 0
 
         if self.matches_file_path_hint(file_path, ("edieuropa", "edi europa")):
             score += 1
-
-        if "edieuropa" in normalized_text or "edi europa" in normalized_text:
-            score += 2
 
         if self.SUPPLIER_TAX_ID.lower() in normalized_text:
             score += 2
@@ -95,5 +95,5 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
     def _parse_amount_match(self, match: re.Match) -> Optional[float]:
         if not match:
             return None
-        return self.parse_amount(match.group(1))  # Usa parse_amount de utils.amounts via base
+        return parse_amount(match.group(1))  # Usa parse_amount de utils.amounts
 

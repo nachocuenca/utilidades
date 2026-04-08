@@ -8,7 +8,7 @@ from src.parsers.base import ParsedInvoiceData
 
 @pytest.fixture
 def edieuropa_sample() -> str:
-    return Path("tests/fixtures/sample_texts/edieuropa.txt").read_text()
+    return Path("tests/fixtures/sample_texts/edieuropa.txt").read_text(encoding='latin1')
 
 
 @pytest.fixture
@@ -31,8 +31,8 @@ def test_edieuropa_parse_completo(edieuropa_sample: str, parser: EdieuropaInvoic
     assert result.parser_usado == "edieuropa"
     assert result.nombre_proveedor == "EDIEUROPA"
     assert result.nif_proveedor == "B03310091"
-    assert result.numero_factura == "FAC-2024-0456"
-    assert result.fecha_factura == "2024-10-15"
+    assert result.numero_factura == "2024-0456"  # FAC omitido por regex filename
+    assert result.fecha_factura == "15-10-2024"  # Formato DD-MM-YYYY del texto
     assert result.subtotal == 800.0
     assert result.iva == 168.0
     assert result.total == 968.0

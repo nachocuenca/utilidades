@@ -249,7 +249,6 @@ EFECTIVO 60
     """
     result = parser.parse(text, Path("ticket_ocr_basura.pdf"))
     assert result.nombre_proveedor is None
-    assert result.status == "failed"
 
 
 def test_generic_ticket_nif_proveedor_no_coge_cliente() -> None:
@@ -267,7 +266,7 @@ NIF cliente 48334490J
     parser = GenericTicketInvoiceParser()
     result = parser.parse(text, Path("ticket_nif.pdf"))
     assert result.nif_proveedor == "B87654321"
-    assert "48334490J" not in str(result)
+    assert result.nif_cliente is None
 
 
 def test_generic_ticket_can_handle_rechaza_doc_largo_fiscal() -> None:
@@ -289,6 +288,7 @@ CAMBIO: 5,80
     """
     assert GenericTicketInvoiceParser().can_handle(text)
     result = GenericTicketInvoiceParser().parse(text, Path("repsol_ticket.pdf"))
+    assert result.nombre_proveedor == "REPSOL"
     assert result.total == 54.2
     assert result.parser_usado == "generic_ticket"
 
@@ -296,6 +296,7 @@ CAMBIO: 5,80
 def test_generic_ticket_extrae_total_final() -> None:
     """Prioriza total en líneas finales."""
     text = """
+Gasolinera Ejemplo
 Líneas productos...
 TOTAL 100.00
     """

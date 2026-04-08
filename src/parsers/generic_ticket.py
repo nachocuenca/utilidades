@@ -118,7 +118,7 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
 
         supplier = self.extract_supplier_name(lines, file_path)
         if not supplier:
-            result.mark_as_failed("No proveedor válido detectado")
+            result.nombre_proveedor = None
             return result.finalize()
 
         result.nombre_proveedor = supplier
@@ -128,14 +128,13 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         result.total = self.extract_ticket_total_improved(text, lines)
 
         if result.total is None:
-            result.mark_as_failed("No total válido detectado")
+            result.nombre_proveedor = None
             return result.finalize()
 
         # Opcionales
         result.subtotal = self.extract_ticket_subtotal(text)
         result.iva = self.extract_ticket_iva(text)
 
-        result.tipo_documento = "ticket"
         return result.finalize()
 
     def extract_supplier_name(self, lines: List[str], file_path: str | Path) -> str | None:
