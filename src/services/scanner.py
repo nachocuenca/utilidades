@@ -104,10 +104,10 @@ class InvoiceScanner:
         default_name = self.settings.default_customer_name.strip()
         default_tax_id = self.settings.default_customer_tax_id.strip()
 
-        if default_name:
+        if default_name and not upsert_data.nombre_cliente:
             upsert_data.nombre_cliente = default_name
 
-        if default_tax_id:
+        if default_tax_id and not upsert_data.nif_cliente:
             upsert_data.nif_cliente = default_tax_id
 
     def scan(

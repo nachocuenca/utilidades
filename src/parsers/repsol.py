@@ -9,6 +9,8 @@ from src.utils.amounts import parse_amount
 from src.utils.dates import normalize_date
 
 
+AMOUNT_PATTERN = re.compile(r"[+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?")
+
 INVOICE_NUMBER_PATTERNS = (
     re.compile(r"n[º°o]?\s*factura\s*[:#-]?\s*([A-Z0-9/.-]+)", re.IGNORECASE),
     re.compile(r"factura\s*n[º°o]?\s*[:#-]?\s*([A-Z0-9/.-]+)", re.IGNORECASE),
@@ -21,13 +23,12 @@ DATE_PATTERNS = (
     re.compile(r"^fecha\s*[:#-]?\s*(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4})", re.IGNORECASE | re.MULTILINE),
 )
 
-BILLING_COMPANY_PATTERNS = (
-    re.compile(r"emitida\s+en\s+nombre\s+y\s+por\s+cuenta\s+de\s+([^\n]+)", re.IGNORECASE),
-    re.compile(r"^(REPSOL\s+COMERCIAL\s+DE\s+PRODUCTOS\s+PETROL[IÍ]FEROS\s+S\.?A\.?)$", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^(REPSOL\s+PETR[ÓO]LEO\s+S\.?A\.?)$", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^(REPSOL\s+SOLUCIONES\s+ENERG[ÉE]TICAS,?\s+S\.?A\.?)$", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^(REPSOL\s+ESTACI[ÓO]N\s+SERVICIO)$", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"^(REPSOL\s+ESTACION\s+DE\s+SERVICIO)$", re.IGNORECASE | re.MULTILINE),
+KNOWN_COMPANY_PATTERNS = (
+    (re.compile(r"repsol\s+soluciones\s+energ[ée]ticas,?\s*s\.?a\.?", re.IGNORECASE), "Repsol Soluciones Energéticas, S.A."),
+    (re.compile(r"repsol\s+comercial\s+de\s+productos\s+petrol[ií]feros,?\s*s\.?a\.?", re.IGNORECASE), "Repsol Comercial de Productos Petrolíferos, S.A."),
+    (re.compile(r"repsol\s+petr[óo]leo,?\s*s\.?a\.?", re.IGNORECASE), "Repsol Petróleo, S.A."),
+    (re.compile(r"repsol\s+estaci[óo]n\s+servicio", re.IGNORECASE), "Repsol Estación Servicio"),
+    (re.compile(r"repsol\s+estacion\s+de\s+servicio", re.IGNORECASE), "Repsol Estación de Servicio"),
 )
 
 TAX_ID_PATTERNS = (
@@ -35,20 +36,20 @@ TAX_ID_PATTERNS = (
     re.compile(r"CIF\s*[:.]?\s*([A-Z]-?\d{8})", re.IGNORECASE),
 )
 
-BASE_PATTERNS = (
-    re.compile(r"importe\s+del\s+producto\s*\(\s*base\s+imponible\s*\)\s*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)", re.IGNORECASE),
-    re.compile(r"base\s+imponible(?:\s+\d+(?:[.,]\d+)?%)?\s*[:\s€]+([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)", re.IGNORECASE),
+BASE_LINE_MARKERS = (
+    re.compile(r"importe\s+del\s+producto.*base\s+imponible", re.IGNORECASE),
+    re.compile(r"\bbase\s+imponible\b", re.IGNORECASE),
 )
 
-IVA_PATTERNS = (
-    re.compile(r"iva\s+\d+[.,]\d+%\s+de\s+[+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?\s*€?\s*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)", re.IGNORECASE),
-    re.compile(r"cuota\s+iva(?:\s+\d+(?:[.,]\d+)?%)?\s*[:\s€]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)", re.IGNORECASE),
+IVA_LINE_MARKERS = (
+    re.compile(r"\biva\b", re.IGNORECASE),
+    re.compile(r"cuota\s+iva", re.IGNORECASE),
 )
 
-TOTAL_PATTERNS = (
-    re.compile(r"total\s+factura\s+euros[^\d\n]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)", re.IGNORECASE),
-    re.compile(r"total\s+factura\s*[:#-]?\s*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)", re.IGNORECASE),
-    re.compile(r"^total\s*[:#-]?\s*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)", re.IGNORECASE | re.MULTILINE),
+TOTAL_LINE_MARKERS = (
+    re.compile(r"total\s+factura\s+euros", re.IGNORECASE),
+    re.compile(r"\btotal\s+factura\b", re.IGNORECASE),
+    re.compile(r"^\s*total\s*[:#-]?", re.IGNORECASE),
 )
 
 
@@ -100,28 +101,20 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
         return result.finalize()
 
     def extract_repsol_billing_company(self, text: str) -> str | None:
-        for pattern in BILLING_COMPANY_PATTERNS:
-            match = pattern.search(text)
-            if not match:
-                continue
-            value = match.group(1) if match.lastindex else match.group(0)
-            return self._normalize_company_name(value)
-        return "REPSOL"
+        lower_text = text.lower()
 
-    def _normalize_company_name(self, value: str) -> str:
-        cleaned = " ".join(value.replace("&#10;", " ").split()).rstrip(". ")
-        key = cleaned.upper().replace("S.A.", "S.A").strip()
-        normalized_map = {
-            "REPSOL SOLUCIONES ENERGÉTICAS, S.A": "Repsol Soluciones Energéticas, S.A.",
-            "REPSOL SOLUCIONES ENERGETICAS, S.A": "Repsol Soluciones Energéticas, S.A.",
-            "REPSOL COMERCIAL DE PRODUCTOS PETROLÍFEROS S.A": "Repsol Comercial de Productos Petrolíferos, S.A.",
-            "REPSOL COMERCIAL DE PRODUCTOS PETROLIFEROS S.A": "Repsol Comercial de Productos Petrolíferos, S.A.",
-            "REPSOL PETRÓLEO S.A": "Repsol Petróleo, S.A.",
-            "REPSOL PETROLEO S.A": "Repsol Petróleo, S.A.",
-            "REPSOL ESTACIÓN SERVICIO": "Repsol Estación Servicio",
-            "REPSOL ESTACION DE SERVICIO": "Repsol Estación de Servicio",
-        }
-        return normalized_map.get(key, cleaned)
+        if "emitida en nombre y por cuenta de" in lower_text:
+            start = lower_text.find("emitida en nombre y por cuenta de")
+            tail = text[start:start + 500]
+            for pattern, canonical_name in KNOWN_COMPANY_PATTERNS:
+                if pattern.search(tail):
+                    return canonical_name
+
+        for pattern, canonical_name in KNOWN_COMPANY_PATTERNS:
+            if pattern.search(text):
+                return canonical_name
+
+        return "REPSOL"
 
     def extract_repsol_supplier_tax_id(self, text: str) -> str | None:
         lower_text = text.lower()
@@ -135,6 +128,21 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
             for tax_id in self.extract_exact_tax_ids(tail):
                 if tax_id != "48334490J":
                     return tax_id
+
+        company = self.extract_repsol_billing_company(text)
+        if company and company != "REPSOL":
+            pattern_map = {
+                "Repsol Soluciones Energéticas, S.A.": r"repsol\s+soluciones\s+energ[ée]ticas.*?(?:c\.i\.f\.|cif)\s*[:.]?\s*([A-Z]-?\d{8})",
+                "Repsol Comercial de Productos Petrolíferos, S.A.": r"repsol\s+comercial\s+de\s+productos\s+petrol[ií]feros.*?(?:c\.i\.f\.|cif)\s*[:.]?\s*([A-Z]-?\d{8})",
+                "Repsol Petróleo, S.A.": r"repsol\s+petr[óo]leo.*?(?:c\.i\.f\.|cif)\s*[:.]?\s*([A-Z]-?\d{8})",
+                "Repsol Estación Servicio": r"repsol\s+estaci[óo]n\s+servicio.*?(?:c\.i\.f\.|cif)\s*[:.]?\s*([A-Z]-?\d{8})",
+                "Repsol Estación de Servicio": r"repsol\s+estacion\s+de\s+servicio.*?(?:c\.i\.f\.|cif)\s*[:.]?\s*([A-Z]-?\d{8})",
+            }
+            regex_text = pattern_map.get(company)
+            if regex_text:
+                match = re.search(regex_text, text, re.IGNORECASE | re.DOTALL)
+                if match:
+                    return match.group(1).replace("-", "")
 
         for pattern in TAX_ID_PATTERNS:
             match = pattern.search(text)
@@ -164,26 +172,48 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
         return self.extract_date(text)
 
     def extract_repsol_subtotal(self, text: str) -> float | None:
-        for pattern in BASE_PATTERNS:
-            match = pattern.search(text)
-            if match:
-                return parse_amount(match.group(1))
-        return self.extract_labeled_amount(text, [r"importe\s+del\s+producto", r"base\s+imponible", r"subtotal"], ignore_percent=True)
+        value = self._extract_last_amount_from_matching_line(text, BASE_LINE_MARKERS)
+        if value is not None:
+            return value
+        return self.extract_labeled_amount(
+            text,
+            [r"importe\s+del\s+producto", r"base\s+imponible", r"subtotal"],
+            ignore_percent=True,
+        )
 
     def extract_repsol_iva(self, text: str) -> float | None:
-        for pattern in IVA_PATTERNS:
-            match = pattern.search(text)
-            if match:
-                return parse_amount(match.group(1))
+        value = self._extract_last_amount_from_matching_line(text, IVA_LINE_MARKERS)
+        if value is not None:
+            return value
         return self.extract_labeled_amount(text, [r"cuota\s+iva", r"\biva\b"], ignore_percent=True)
 
     def extract_repsol_total(self, file_path: str | Path, text: str) -> float | None:
-        for pattern in TOTAL_PATTERNS:
-            match = pattern.search(text)
-            if match:
-                return parse_amount(match.group(1))
+        value = self._extract_last_amount_from_matching_line(text, TOTAL_LINE_MARKERS)
+        if value is not None:
+            return value
 
         stem_match = re.search(r"(\d+(?:,\d{2})?)\s*€", Path(file_path).stem)
         if stem_match:
             return parse_amount(stem_match.group(1))
         return self.extract_total(text)
+
+    def _extract_last_amount_from_matching_line(self, text: str, markers: tuple[re.Pattern[str], ...]) -> float | None:
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if not any(marker.search(line) for marker in markers):
+                continue
+
+            parsed_values: list[float] = []
+            for token in AMOUNT_PATTERN.findall(line):
+                parsed = parse_amount(token)
+                if parsed is not None:
+                    parsed_values.append(parsed)
+
+            if not parsed_values:
+                continue
+
+            return parsed_values[-1]
+
+        return None
