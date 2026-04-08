@@ -37,34 +37,41 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         result = self.build_result(text, file_path)
 
-        # Proveedor fijo + NIF optimizado Repsol
         result.nombre_proveedor = "REPSOL"
         result.nif_proveedor = self.extract_repsol_supplier_tax_id(text)
         result.numero_factura = self.extract_repsol_invoice_number(text)
-        result.fecha_factura = self.extract_filename_date(
-            file_path,
-            patterns=[
-                r"([0-3]\\d[_\-][01]\\d[_\-]20\\d{2})",
-            ],
-        ) or self.extract_date(text)
+        
+        raw_date = self.extract_filename_date(file_path, patterns=[r"(\\d{1,2})[/-](\\d{1,2})[/-](\\d{4})"]) or self.extract_date(text)
+        # Siempre ISO yyyy-mm-dd para tests
+        if raw_date and '-' in raw_date:
+            try:
+                # dd-mm-yyyy -> yyyy-mm-dd
+                d, m, y = raw_date.split('-')
+                iso_date = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                result.fecha_factura = iso_date
+            except:
+                result.fecha_factura = raw_date
+        else:
+            result.fecha_factura = raw_date
 
-        # Usar métodos genéricos con summary coherente Base+IVA=Total
-        result.subtotal = self.extract_subtotal(text)
-        result.iva = self.extract_repsol_iva(text)  # Repsol-specific
+        result.subtotal = self.extract_repsol_subtotal(text)
+        result.iva = self.extract_repsol_iva(text)
         result.total = self.extract_repsol_total(file_path, text)
 
         return result.finalize()
 
     def extract_repsol_supplier_tax_id(self, text: str) -> str | None:
-        # Patterns Repsol: CIF:, B28..., B48... estaciones
-        for pattern in [
-            r"CIF[:\\s]+(B\\d{7}[A-Z])",
-            r"C\\.I\\.F\\.[:\\s]+(B\\d{7}[A-Z])",
-        ]:
-            match = re.search(pattern, text, re.IGNORECASE)
+        # Patterns Repsol ultra-robustos para CIF: B28920839 con cualquier separador
+        patterns = [
+            r"CIF[:\\s&#10;]*([B]\\d{8}[A-Z])",
+            r"C\\.I\\.F\\.[:\\s&#10;]*([B]\\d{8}[A-Z])",
+            r"([B]\\d{8}[A-Z])\\s*(?i:Dirección|Direcci[oó]n)",
+            r"([B]\\d{8}[A-Z])\\b(?![^\\n]*CLIENTE)",  # B28920839 no seguido cliente
+        ]
+        for pat in patterns:
+            match = re.search(pat, text, re.IGNORECASE)
             if match:
                 return match.group(1).upper()
-        # Fallback genérico
         return self.extract_supplier_tax_id(text)
 
     def extract_repsol_invoice_number(self, text: str) -> str | None:
@@ -78,17 +85,32 @@ class RepsolInvoiceParser(GenericSupplierInvoiceParser):
             return self.clean_invoice_number_candidate(match.group(1))
         return self.extract_invoice_number(text)
 
-    def extract_repsol_iva(self, text: str) -> float | None:
-        # Repsol-specific: IVA 21%: 65,10 / CUOTA IVA 21%
+    def extract_repsol_subtotal(self, text: str) -> float | None:
+        # Específico Repsol: Base Imponible con espacios/€ tolerant
         patterns = [
-            r"IVA\\s*\\d+%?[:\\s]*(\\d+[.,]\\d{2})",
-            r"CUOTA\\s+IVA[:\\s](\\d+[.,]\\d{2})",
+            r"Base\\s+Imponible\\s*[:\\s€]*(\\d{1,3}(?:[.,]\\d{2})?)",
+            r"BASE\\s+IMPONIBLE\\s*[:\\s€]*(\\d{1,3}(?:[.,]\\d{2})?)",
+            r"(?i)base\\s+imponible.*?(\\d{1,3}(?:,\\d{2})?€?)",
+        ]
+        for pat in patterns:
+            match = re.search(pat, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                amt = match.group(1).replace('€', '').strip()
+                val = parse_amount(amt)
+                if val is not None:
+                    return val
+        return self.extract_subtotal(text)
+
+    def extract_repsol_iva(self, text: str) -> float | None:
+        patterns = [
+            r"IVA\\s*21%?[:\\s]*(\\d+[.,]\\d{2})",
+            r"CUOTA\\s+IVA[:\\s]*(\\d+[.,]\\d{2})",
         ]
         for pat in patterns:
             match = re.search(pat, text, re.IGNORECASE)
             if match:
                 return parse_amount(match.group(1))
-        return self.extract_iva(text)  # Fallback genérico con summary
+        return self.extract_iva(text)
 
     def extract_repsol_total(self, file_path: str | Path, text: str) -> float | None:
         value = self.extract_total(text)  # Genérico con summary coherente
