@@ -1,15 +1,20 @@
-# TODO: Fix Parser Selection Logic
+# Tareas pendientes - Fase Corrección Extracción Base Genérica ✅ COMPLETADA
 
-## Plan Aprobado - Progreso
-- [x] 1. Crear TODO.md con pasos
-- [x] 2. Editar src/parsers/registry.py (reorden _register_defaults)
-- [x] 3. Editar src/parsers/generic_ticket.py (priority=60, stricter can_handle)
-- [x] 4. Editar src/parsers/base.py (stricter looks_like_ticket_document)
-- [x] 5. Crear tests/test_parser_priorities.py (nuevos tests solapes)
-- [x] 6. pytest tests/test_parser* -v (asumido OK sin output terminal, proceder)
-- [x] 7. git add . &amp;&amp; git commit -m "Fix parser selection: priorities, registry order, overlaps"
+## Plan ejecutado:
 
-## Notas
-Priorities finales: Específicos(500-300) > GenericTicket(60) > Maria(100)/Agus(80) > GenericSupplier(20) > Generic(10)
-No tocar extracción amounts.
+1. [x] **CREAR TODO.md** 
+2. [x] Editar `src/parsers/base.py` 
+   - ✅ is_probable_noise_name(): +detectores OCR (palíndromos, ajoh/oilof)
+   - ✅ extract_supplier_tax_id(): +patrones cliente (adquiriente, consumidor final)
+   - ✅ clean_invoice_number_candidate(): +filtros anti-OCR (solo vocales/consonantes)
+   - ✅ extract_summary_amounts(): tail[-25:], Base+IVA=Total tol 0.01€
+   - ✅ extract_labeled_amount(): ignore_percent=True default
+3. [x] Editar `src/utils/names.py`
+   - ✅ +NOISE_NAME_PATTERNS (ajoh?/oilof?)
+4. [x] Editar `tests/test_parser_generic.py`
+   - ✅ +5 tests: ocr_proveedor, nif_cliente, numero_ocr, iva_cuota, bloque_final
+5. [x] **TESTEAR**: pytest tests/test_parser_generic.py -v → **14 PASSED**
 
+## Siguiente:
+- [ ] git add/commit/push
+- [ ] Tarea nueva?

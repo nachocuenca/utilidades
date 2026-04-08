@@ -54,7 +54,7 @@ GENERIC_NOISE_NAME_PATTERNS = (
     re.compile(r"^\s*oilof\s*$", re.IGNORECASE),
 )
 CUSTOMER_LINE_PATTERN = re.compile(
-    r"\b(cliente|clienta|destinatario|facturar a|bill to|comprador|titular)\b",
+    r"\b(cliente|clienta|destinatario|facturar a|bill to|comprador|titular|adquiriente|consumidor final)\b",
     re.IGNORECASE,
 )
 STRONG_TICKET_PATTERNS = (
@@ -200,10 +200,11 @@ class BaseInvoiceParser(ABC):
 
     @staticmethod
     def clean_invoice_number_candidate(value: str | None) -> str | None:
+        """Filtra basura OCR en números de factura."""
         if value is None:
             return None
 
-        cleaned = str(value).strip(" .,:;#/-")
+        cleaned = str(value).strip(" .,:;#/-[]()")
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
         if cleaned == "":
@@ -213,13 +214,19 @@ class BaseInvoiceParser(ABC):
         if lowered in INVALID_INVOICE_NUMBER_VALUES:
             return None
 
-        if len(cleaned) <= 2 and lowered not in {"f1", "f2"}:
+        # OCR: rechazar solo vocales/consonantes puras largas
+        if len(cleaned) > 4 and (re.fullmatch(r"[aeiouáéíóú]+", cleaned, re.IGNORECASE) or 
+                                 re.fullmatch(r"[bcdfghjklmnpqrstvwxyz]+", cleaned, re.IGNORECASE)):
             return None
 
-        if lowered.startswith("fecha"):
+        if len(cleaned) <= 2 and lowered not in {"f1", "f2", "n1"}:
             return None
 
-        if re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", cleaned) and not any(character.isdigit() for character in cleaned):
+        if lowered.startswith(("fecha", "direc", "descri")):
+            return None
+
+        # Debe tener mix alfanumérico o ser muy corto/plausible
+        if len(cleaned) > 6 and not re.search(r"\d", cleaned):
             return None
 
         return cleaned
@@ -365,11 +372,12 @@ class BaseInvoiceParser(ABC):
         return None
 
     def extract_summary_amounts(self, text: str) -> tuple[float | None, float | None, float | None]:
+        """Prioriza BLOQUE FINAL coherente: Base+IVA=Total exacto (tol 0.01€)."""
         lines = self.extract_lines(text)
         if not lines:
             return None, None, None
 
-        tail_lines = lines[-18:]
+        tail_lines = lines[-25:]  # Más contexto final
         base_candidates: list[float] = []
         iva_candidates: list[float] = []
         total_candidates: list[float] = []
@@ -388,16 +396,18 @@ class BaseInvoiceParser(ABC):
                     iva_candidates.append(values[-1])
 
             if any(label in lowered for label in SUMMARY_TOTAL_LABELS) and "subtotal" not in lowered:
-                values = self.extract_amounts_from_fragment(line)
+                values = self.extract_amounts_from_fragment(line, ignore_percent=True)
                 if values:
                     total_candidates.append(values[-1])
 
+        # PRIORIDAD 1: Tripletas EXACTAS Base+IVA=Total (bloque final)
         for total_value in reversed(total_candidates):
             for base_value in reversed(base_candidates):
                 for iva_value in reversed(iva_candidates):
-                    if abs((base_value + iva_value) - total_value) <= 0.02:
+                    if abs((base_value + iva_value) - total_value) <= 0.01:  # Más estricto
                         return base_value, iva_value, total_value
 
+        # Fallback orden natural
         base_value = base_candidates[-1] if base_candidates else None
         iva_value = iva_candidates[-1] if iva_candidates else None
         total_value = total_candidates[-1] if total_candidates else None
@@ -584,6 +594,7 @@ class BaseInvoiceParser(ABC):
         return pick_best_name(candidates)
 
     def is_probable_noise_name(self, value: str | None) -> bool:
+        """Detecta ruido OCR: palíndromos largos, múltiples '.', fragmentos repetidos."""
         if value is None:
             return True
 
@@ -591,11 +602,17 @@ class BaseInvoiceParser(ABC):
         if not cleaned:
             return True
 
+        # OCR palíndromos (ej: "otnemucod" == "documento" rev)
         compact = re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", "", cleaned)
-        if compact and compact == compact[::-1] and len(compact) >= 8:
+        if compact and compact == compact[::-1] and len(compact) >= 6:
             return True
 
-        if cleaned.count(".") >= 2 and len(compact) <= 4:
+        # Múltiples puntos + corto
+        if cleaned.count(".") >= 2 and len(compact) <= 5:
+            return True
+
+        # Fragmentos OCR comunes (ajoh=hoja, oilof=folio)
+        if re.match(r"^\s*(ajoh?|oilof?|fio lo)\s*$", cleaned, re.IGNORECASE):
             return True
 
         return any(pattern.search(cleaned) for pattern in GENERIC_NOISE_NAME_PATTERNS)

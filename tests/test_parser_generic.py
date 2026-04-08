@@ -109,6 +109,74 @@ def test_base_parser_noise_detector_flags_reversed_or_fragmented_names() -> None
     assert parser.is_probable_noise_name("FRANCISCO AMADOR GARCIA") is False
 
 
+def test_generic_base_rechaza_proveedor_ocr_basura() -> None:
+    """Proveedor basura OCR filtrado."""
+    parser = GenericSupplierInvoiceParser()
+    text = """
+otnemucod
+ajoh 
+OILOF 
+.F.I.N
+Cliente: Cliente Prueba SL
+    """
+    result = parser.parse(text, Path("ocr_proveedor_basura.pdf"))
+    assert result.nombre_proveedor is None
+
+
+def test_generic_base_nif_proveedor_no_coge_cliente() -> None:
+    """NIF proveedor excluye correctamente NIF cliente."""
+    text = """
+PROVEEDOR XYZ SL
+NIF B12345678
+
+Cliente Prueba SL
+NIF cliente 48334490J
+    """
+    parser = GenericSupplierInvoiceParser()
+    result = parser.parse(text, Path("nif_cliente.pdf"))
+    assert result.nif_proveedor == "B12345678"
+
+
+def test_generic_base_numero_factura_filtra_ocr() -> None:
+    """Numero_factura rechaza basura OCR."""
+    assert GenericInvoiceParser().clean_invoice_number_candidate("direcci") is None
+    assert GenericInvoiceParser().clean_invoice_number_candidate("aeiouprueba") is None
+    assert GenericInvoiceParser().clean_invoice_number_candidate("F123") == "F123"
+    assert GenericInvoiceParser().clean_invoice_number_candidate("2026-001") == "2026-001"
+
+
+def test_generic_base_iva_cuota_no_porcentaje() -> None:
+    """IVA extrae cuota real, no tipo %."""
+    text = """
+Base imponible 100,00
+IVA (21%) 21,00 
+Total factura 121,00
+    """
+    parser = GenericInvoiceParser()
+    result = parser.parse(text, Path("iva_test.pdf"))
+    assert result.iva == 21.0
+
+
+def test_generic_base_prioriza_bloque_final() -> None:
+    """Prioriza bloque final coherente Base+IVA=Total."""
+    text = """
+...líneas intermedias...
+Base 80.00
+IVA 16.80
+Subtotal parcial 96.80
+
+*** RESUMEN FINAL ***
+Base imponible..... 118.00
+IVA 21%............ 24.78
+TOTAL FACTURA...... 142.78
+    """
+    parser = GenericSupplierInvoiceParser()
+    result = parser.parse(text, Path("bloque_final.pdf"))
+    assert result.subtotal == 118.0
+    assert result.iva == 24.78
+    assert result.total == 142.78
+
+
 def test_generic_supplier_uses_folder_alias_for_levantia_when_ocr_name_is_noisy() -> None:
     text = """
     77410930B
