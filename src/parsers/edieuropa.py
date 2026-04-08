@@ -1,11 +1,14 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from pathlib import Path
 import re
-from typing import Optional
+from pathlib import Path
 
 from src.parsers.base import BaseInvoiceParser, ParsedInvoiceData
 from src.utils.amounts import parse_amount
+from src.utils.dates import normalize_date
+
+
+DATE_PATTERN = re.compile(r"\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b")
 
 
 class EdieuropaInvoiceParser(BaseInvoiceParser):
@@ -14,59 +17,65 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
     SUPPLIER_TAX_ID = "B03310091"
 
     SUMMARY_PATTERNS = {
-        'base': [
+        "base": [
             r"base\s+imponible[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
-            r"subtotal[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
+            r"subtotal(?:\s+art[íi]culos)?[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
         ],
-        'iva': [
+        "iva": [
             r"iva\s*\d*%?[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
             r"cuota\s+iva[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
         ],
-        'total': [
+        "total": [
             r"total\s+factura[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
             r"total[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
-        ]
+        ],
     }
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         normalized_text = text.lower()
-        if "edieuropa" not in normalized_text and "edi europa" not in normalized_text:
+
+        if "sin edieuropa" in normalized_text:
             return False
-        score = 0
 
-        if self.matches_file_path_hint(file_path, ("edieuropa", "edi europa")):
-            score += 1
+        path_hint = self.matches_file_path_hint(file_path, ("edieuropa", "edi europa"))
+        has_brand = "edieuropa" in normalized_text or "edi europa" in normalized_text
+        has_tax_id = self.SUPPLIER_TAX_ID.lower() in normalized_text
+        has_company_context = any(
+            marker in normalized_text
+            for marker in ("electrodom", "m[áa]quinas", "electrodomésticos", "maquinas")
+        )
 
-        if self.SUPPLIER_TAX_ID.lower() in normalized_text:
-            score += 2
-
-        return score >= 2
+        return has_tax_id or (has_brand and (path_hint or has_company_context))
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         result = self.build_result(text, file_path)
 
-        # Datos fijos del proveedor
         result.nombre_proveedor = "EDIEUROPA"
         result.nif_proveedor = self.SUPPLIER_TAX_ID
 
-        # Número y fecha desde filename (patrón específico Edieuropa)
-        result.numero_factura = self.extract_filename_invoice_number(
+        text_invoice_number = self.extract_invoice_number(text)
+        filename_invoice_number = self.extract_filename_invoice_number(
             file_path,
-            [r"[Ff]ac-?(\d{4}-\d+)", r"[Ff]actura\s*([0-9A-Z\-]+)"],
-        ) or self.extract_invoice_number(text)
+            [
+                r"([Ff][Aa][Cc]-?\d{4}-\d+)",
+                r"([Ff]actura[-_ ]*[0-9A-Z\-]+)",
+            ],
+        )
+        result.numero_factura = self._normalize_invoice_number(
+            text_invoice_number or filename_invoice_number
+        )
 
-        result.fecha_factura = self.extract_filename_date(file_path) or self.extract_date(text)
+        result.fecha_factura = self._extract_project_date(text) or self._extract_project_date(
+            str(Path(file_path).stem)
+        )
 
-        # Extracción específica: priorizar BLOQUE FINAL coherente Base+IVA=Total
         lines = self.extract_lines(text)
-        tail_lines = lines[-20:]  # Últimas 20 líneas para resumen
-        tail_text = " ".join(tail_lines)
+        tail_text = " ".join(lines[-20:])
 
-        base_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS['base'])
-        iva_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS['iva'])
-        total_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS['total'])
+        base_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS["base"])
+        iva_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS["iva"])
+        total_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS["total"])
 
-        # REGLA FUERTE: si Base + IVA = Total en bloque final, usarlos
         if base_match and iva_match and total_match:
             base_val = self._parse_amount_match(base_match)
             iva_val = self._parse_amount_match(iva_match)
@@ -78,22 +87,35 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
                     result.total = total_val
                     return result.finalize()
 
-        # Fallback a métodos base si no hay bloque coherente
         result.subtotal = self.extract_subtotal(text)
         result.iva = self.extract_iva(text)
         result.total = self.extract_total(text)
 
         return result.finalize()
 
-    def _extract_amount(self, text: str, patterns: list[str]) -> Optional[re.Match]:
+    def _extract_amount(self, text: str, patterns: list[str]) -> re.Match[str] | None:
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 return match
         return None
 
-    def _parse_amount_match(self, match: re.Match) -> Optional[float]:
+    def _parse_amount_match(self, match: re.Match[str] | None) -> float | None:
         if not match:
             return None
-        return parse_amount(match.group(1))  # Usa parse_amount de utils.amounts
+        return parse_amount(match.group(1))
 
+    def _extract_project_date(self, value: str | None) -> str | None:
+        if not value:
+            return None
+
+        match = DATE_PATTERN.search(value)
+        if not match:
+            return None
+
+        return normalize_date(match.group(0))
+
+    def _normalize_invoice_number(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        return re.sub(r"^[Ff][Aa][Cc]-?", "", value).strip()
