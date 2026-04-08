@@ -105,7 +105,7 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         if nif_count > 3:
             return False
 
-        # Rechazar si muchas líneas OCR basura en top
+        # Rechazar si muchos líneas OCR basura en top
         basura_top = sum(1 for line in lines[:10] if is_ocr_basura(line))
         if basura_top > 3:
             return False
@@ -139,12 +139,12 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         return result.finalize()
 
     def extract_supplier_name(self, lines: List[str], file_path: str | Path) -> str | None:
-            ignored_patterns = [
-                re.compile(r"(?i)(factura\s+simplificada|subtotal|total|base|cuota|producto|importe|entregado|cambio|efectivo|tel[.:]|avenida|calle)"),
-                re.compile(r"(?i)(c/|c\.|poblacion|provincia)"),
-                re.compile(r"(?i)(informacion\s+adicional|referencia|cumplimiento|normativa)"),
-                re.compile(r"(?i)(nif\s+cliente|cliente)"),
-            ]
+        ignored_patterns = [
+            re.compile(r"(?i)(factura\s+simplificada|subtotal|total|base|cuota|producto|importe|entregado|cambio|efectivo|tel[.:]|avenida|calle)"),
+            re.compile(r"(?i)(c/|c\.|poblacion|provincia)"),
+            re.compile(r"(?i)(informacion\s+adicional|referencia|cumplimiento|normativa)"),
+            re.compile(r"(?i)(nif\s+cliente|cliente)"),
+        ]
 
         candidates = []
 
@@ -302,3 +302,4 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
             return value
 
         return self.extract_total(text)
+
