@@ -6,28 +6,26 @@ from pathlib import Path
 from src.parsers.base import BaseInvoiceParser, ParsedInvoiceData
 from src.parsers.generic import GenericInvoiceParser
 
-PROVIDER_NAME_PATTERN = re.compile(
-    r"\bclinica\s+almendros\b",
+CLINICA_PROVIDER_NAME = "Clinica Almendros"
+CLINICA_PROVIDER_TAX_ID = "48331209K"
+
+CUSTOMER_NAME_INLINE_PATTERN = re.compile(
+    r"Titular:\s*(.+)",
     re.IGNORECASE,
 )
 
-CUSTOMER_NAME_INLINE_PATTERN = re.compile(
-    r"^\s*titular\s*:\s*(.+?)\s*$",
-    re.IGNORECASE | re.MULTILINE,
-)
-
 CUSTOMER_TAX_ID_PATTERN = re.compile(
-    r"c\.?\s*i\.?\s*f\.?\s*/\s*n\.?\s*i\.?\s*f\.?\s*titular\s*:\s*([A-Z0-9]+)",
+    r"C\.?I\.?F\.?\s*/\s*N\.?I\.?F\.?\s*Titular:\s*([A-Z0-9]+)",
     re.IGNORECASE,
 )
 
 INVOICE_NUMBER_PATTERN = re.compile(
-    r"factura\s*n[º°o]?\s*:\s*([A-Z0-9/-]+)",
+    r"Factura\s*N[º°o]?:\s*([A-Z0-9/-]+)",
     re.IGNORECASE,
 )
 
 DATE_PATTERN = re.compile(
-    r"fecha\s*:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})",
+    r"Fecha:\s*([0-9]{2}/[0-9]{2}/[0-9]{4})",
     re.IGNORECASE,
 )
 
@@ -45,19 +43,18 @@ class AgusInvoiceParser(BaseInvoiceParser):
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         normalized_text = text.lower()
 
-        clues = (
-            "agus",
-            "agus factura",
-            "agust",
-            "agustin",
-            "agustín",
-            "clinica almendros",
-            "clínica almendros",
-            "clinicaalmendros.com",
-            "centro de fisioterapia",
-        )
-
-        if any(clue in normalized_text for clue in clues):
+        if any(
+            clue in normalized_text
+            for clue in (
+                "clinica almendros",
+                "clínica almendros",
+                "clinicaalmendros.com",
+                "centro de fisioterapia",
+                "agus",
+                "agustin",
+                "agustín",
+            )
+        ):
             return True
 
         if file_path is not None:
@@ -68,152 +65,98 @@ class AgusInvoiceParser(BaseInvoiceParser):
         return False
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
-        lines = self.extract_lines(text)
+        if self.is_clinica_almendros_layout(text, file_path):
+            return self.parse_clinica_almendros(text, file_path)
+
         result = self._generic.parse(text, file_path)
         result.parser_usado = self.parser_name
+        return result.finalize()
 
-        provider_name = self.extract_agus_provider_name(lines)
-        if provider_name:
-            result.nombre_proveedor = provider_name
+    def is_clinica_almendros_layout(self, text: str, file_path: str | Path) -> bool:
+        normalized_text = text.lower()
+        path_text = self.get_path_text(file_path)
 
-        customer_tax_id = self.extract_agus_customer_tax_id(text)
-        if customer_tax_id:
-            result.nif_cliente = customer_tax_id
-
-        customer_name = self.extract_agus_customer_name(text, lines)
-        if customer_name:
-            result.nombre_cliente = customer_name
-
-        provider_tax_id = self.extract_agus_provider_tax_id(
-            text=text,
-            lines=lines,
-            customer_tax_id=result.nif_cliente,
-            current_provider_tax_id=result.nif_proveedor,
+        return (
+            "clinica almendros" in normalized_text
+            or "clínica almendros" in normalized_text
+            or "clinicaalmendros.com" in normalized_text
+            or "almendros" in path_text
         )
-        if provider_tax_id:
-            result.nif_proveedor = provider_tax_id
 
-        invoice_number = self.extract_agus_invoice_number(text)
-        if invoice_number:
-            result.numero_factura = invoice_number
+    def parse_clinica_almendros(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
+        lines = self.extract_lines(text)
+        result = self.build_result(text, file_path)
+        result.parser_usado = self.parser_name
 
-        invoice_date = self.extract_agus_date(text)
-        if invoice_date:
-            result.fecha_factura = invoice_date
+        result.nombre_proveedor = CLINICA_PROVIDER_NAME
+        result.nif_proveedor = self.extract_clinica_provider_tax_id(text, lines)
+        result.nombre_cliente = self.extract_clinica_customer_name(text, lines)
+        result.nif_cliente = self.extract_clinica_customer_tax_id(text)
+        result.numero_factura = self.extract_clinica_invoice_number(text)
+        result.fecha_factura = self.extract_clinica_date(text)
+        result.subtotal = self.extract_labeled_amount(text, [r"subtotal"])
+        result.total = self.extract_labeled_amount(text, [r"total"])
 
-        subtotal = self.extract_agus_subtotal(text)
-        if subtotal is not None:
-            result.subtotal = subtotal
-
-        total = self.extract_agus_total(text)
-        if total is not None:
-            result.total = total
-
-        if result.iva is None and result.subtotal is not None and result.total is not None:
+        if result.subtotal is not None and result.total is not None:
             if round(float(result.subtotal) - float(result.total), 2) == 0:
                 result.iva = 0.0
 
         return result.finalize()
 
-    def extract_agus_provider_name(self, lines: list[str]) -> str | None:
-        for line in lines[:10]:
-            if PROVIDER_NAME_PATTERN.search(line):
-                return "Clinica Almendros"
-
-        for line in lines[:10]:
-            lower_line = line.lower()
-            if "agus" in lower_line or "agustin" in lower_line or "agustín" in lower_line:
-                return line
-
-        return None
-
-    def extract_agus_customer_name(self, text: str, lines: list[str]) -> str | None:
-        inline_match = CUSTOMER_NAME_INLINE_PATTERN.search(text)
-        if inline_match:
-            candidate = inline_match.group(1).strip()
-            if self._is_valid_customer_name(candidate):
+    def extract_clinica_customer_name(self, text: str, lines: list[str]) -> str | None:
+        match = CUSTOMER_NAME_INLINE_PATTERN.search(text)
+        if match:
+            candidate = match.group(1).strip()
+            if self.is_valid_customer_name(candidate):
                 return candidate
 
         for index, line in enumerate(lines):
-            normalized = line.strip().lower()
-            if not normalized.startswith("titular"):
+            stripped = line.strip()
+
+            if not stripped.lower().startswith("titular"):
                 continue
 
-            if ":" in line:
-                right_side = line.split(":", 1)[1].strip()
-                if self._is_valid_customer_name(right_side):
-                    return right_side
-
-            for offset in range(1, 3):
-                next_index = index + offset
-                if next_index >= len(lines):
-                    break
-
-                candidate = lines[next_index].strip()
-                if self._is_valid_customer_name(candidate):
+            if ":" in stripped:
+                candidate = stripped.split(":", 1)[1].strip()
+                if self.is_valid_customer_name(candidate):
                     return candidate
 
-        for line in lines:
-            lower_line = line.lower()
-            if "visita del paciente" in lower_line:
-                candidate = re.sub(
-                    r"^.*visita del paciente\s+",
-                    "",
-                    line,
-                    flags=re.IGNORECASE,
-                ).strip()
-                if self._is_valid_customer_name(candidate):
+            if index + 1 < len(lines):
+                candidate = lines[index + 1].strip()
+                if self.is_valid_customer_name(candidate):
                     return candidate
 
         return None
 
-    def extract_agus_customer_tax_id(self, text: str) -> str | None:
+    def extract_clinica_customer_tax_id(self, text: str) -> str | None:
         match = CUSTOMER_TAX_ID_PATTERN.search(text)
         if match:
             return match.group(1)
-
         return None
 
-    def extract_agus_provider_tax_id(
-        self,
-        text: str,
-        lines: list[str],
-        customer_tax_id: str | None,
-        current_provider_tax_id: str | None,
-    ) -> str | None:
-        excluded = customer_tax_id
+    def extract_clinica_provider_tax_id(self, text: str, lines: list[str]) -> str:
+        customer_tax_id = self.extract_clinica_customer_tax_id(text)
 
-        for line in lines[:15]:
-            lower_line = line.lower()
-
-            if "titular" in lower_line:
+        for line in lines:
+            if "clinica almendros" not in line.lower() and "clínica almendros" not in line.lower():
                 continue
 
-            if "clinica almendros" not in lower_line and "clínica almendros" not in lower_line:
-                continue
-
-            candidates = self.extract_exact_tax_ids(line)
-            for candidate in candidates:
-                normalized = self.normalize_agus_provider_tax_id(candidate)
-                if excluded and normalized == excluded:
+            for candidate in self.extract_exact_tax_ids(line):
+                normalized = self.normalize_clinica_provider_tax_id(candidate)
+                if customer_tax_id and normalized == customer_tax_id:
                     continue
                 return normalized
 
-        if current_provider_tax_id:
-            normalized_current = self.normalize_agus_provider_tax_id(current_provider_tax_id)
-            if not excluded or normalized_current != excluded:
-                return normalized_current
-
-        all_candidates = self.extract_exact_tax_ids(text)
-        for candidate in all_candidates:
-            normalized = self.normalize_agus_provider_tax_id(candidate)
-            if excluded and normalized == excluded:
+        for candidate in self.extract_exact_tax_ids(text):
+            normalized = self.normalize_clinica_provider_tax_id(candidate)
+            if customer_tax_id and normalized == customer_tax_id:
                 continue
-            return normalized
+            if normalized == CLINICA_PROVIDER_TAX_ID:
+                return normalized
 
-        return None
+        return CLINICA_PROVIDER_TAX_ID
 
-    def normalize_agus_provider_tax_id(self, value: str) -> str:
+    def normalize_clinica_provider_tax_id(self, value: str) -> str:
         candidate = str(value).strip().upper()
 
         if REVERSED_DNI_PATTERN.fullmatch(candidate):
@@ -223,37 +166,19 @@ class AgusInvoiceParser(BaseInvoiceParser):
 
         return candidate
 
-    def extract_agus_invoice_number(self, text: str) -> str | None:
+    def extract_clinica_invoice_number(self, text: str) -> str | None:
         match = INVOICE_NUMBER_PATTERN.search(text)
         if match:
             return match.group(1)
-
         return self.extract_invoice_number(text)
 
-    def extract_agus_date(self, text: str) -> str | None:
+    def extract_clinica_date(self, text: str) -> str | None:
         match = DATE_PATTERN.search(text)
         if match:
             return match.group(1)
-
         return self.extract_date(text)
 
-    def extract_agus_subtotal(self, text: str) -> float | None:
-        return self.extract_labeled_amount(
-            text,
-            [
-                r"subtotal",
-            ],
-        )
-
-    def extract_agus_total(self, text: str) -> float | None:
-        return self.extract_labeled_amount(
-            text,
-            [
-                r"total",
-            ],
-        )
-
-    def _is_valid_customer_name(self, value: str | None) -> bool:
+    def is_valid_customer_name(self, value: str | None) -> bool:
         if value is None:
             return False
 
@@ -262,21 +187,23 @@ class AgusInvoiceParser(BaseInvoiceParser):
             return False
 
         lowered = candidate.lower()
-        invalid_tokens = (
-            "direccion",
-            "dirección",
-            "provincia",
-            "c.p.",
-            "cp",
-            "españa",
-            "espana",
-            "factura",
-            "fecha",
-        )
-        if any(token in lowered for token in invalid_tokens):
+        if any(
+            token in lowered
+            for token in (
+                "direccion",
+                "dirección",
+                "provincia",
+                "c.p.",
+                "cp",
+                "españa",
+                "espana",
+                "factura",
+                "fecha",
+            )
+        ):
             return False
 
-        if any(char.isdigit() for char in candidate):
+        if any(character.isdigit() for character in candidate):
             return False
 
         return True
