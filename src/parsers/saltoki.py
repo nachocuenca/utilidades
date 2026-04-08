@@ -180,8 +180,12 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         lines: list[str],
         text: str,
     ) -> tuple[float | None, float | None, float | None]:
+        summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
+        if summary_base is not None and summary_iva is not None and summary_total is not None:
+            return summary_base, summary_iva, summary_total
+
         total = self.extract_total_from_tail(lines, text)
-        base, iva = self.extract_base_and_iva_from_tail(lines)
+        base, iva = self.extract_base_and_iva_from_tail(lines, total_hint=total)
 
         if base is None and iva is not None and total is not None:
             base = round(total - iva, 2)
@@ -190,13 +194,17 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
             iva = round(total - base, 2)
 
         if base is None:
-            base = self.extract_labeled_amount(text, [r"base\s+imponible", r"subtotal"])
+            base = self.extract_labeled_amount(text, [r"base\s+imponible", r"subtotal"], ignore_percent=True)
 
         if iva is None:
-            iva = self.extract_labeled_amount(text, [r"i\.?v\.?a\.?", r"cuota\s+iva", r"importe\s+iva"])
+            iva = self.extract_labeled_amount(text, [r"i\.?v\.?a\.?", r"cuota\s+iva", r"importe\s+iva"], ignore_percent=True)
 
         if total is None:
             total = self.extract_labeled_amount(text, [r"total\s+factura", r"importe\s+total", r"\btotal\b"])
+
+        if base is not None and iva is not None and total is not None:
+            if abs((base + iva) - total) <= 0.03:
+                return base, iva, total
 
         return base, iva, total
 
@@ -218,15 +226,19 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
 
         return None
 
-    def extract_base_and_iva_from_tail(self, lines: list[str]) -> tuple[float | None, float | None]:
-        tail_lines = lines[-20:]
+    def extract_base_and_iva_from_tail(
+        self,
+        lines: list[str],
+        total_hint: float | None = None,
+    ) -> tuple[float | None, float | None]:
+        tail_lines = lines[-28:]
 
         for line in reversed(tail_lines):
             if self.looks_like_date_line(line):
                 continue
 
             amounts = self.parse_amounts_from_line(line)
-            if not amounts:
+            if len(amounts) < 2:
                 continue
 
             if len(amounts) == 3 and self.looks_like_vat_rate(amounts[1]):
@@ -237,6 +249,34 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
 
             if len(amounts) == 3 and self.looks_like_vat_rate(amounts[0]):
                 return amounts[2], amounts[1]
+
+            rates = [value for value in amounts if self.looks_like_vat_rate(value)]
+            if not rates:
+                continue
+
+            for rate in rates:
+                rate_index = amounts.index(rate)
+                numeric_candidates = [
+                    value
+                    for index, value in enumerate(amounts)
+                    if index != rate_index and value > 0
+                ]
+                if len(numeric_candidates) < 2:
+                    continue
+
+                numeric_candidates_sorted = sorted(numeric_candidates)
+                for left_index in range(len(numeric_candidates_sorted)):
+                    for right_index in range(left_index + 1, len(numeric_candidates_sorted)):
+                        first = numeric_candidates_sorted[left_index]
+                        second = numeric_candidates_sorted[right_index]
+                        base_candidate, iva_candidate = sorted((first, second), reverse=True)
+
+                        if total_hint is not None:
+                            if abs((base_candidate + iva_candidate) - total_hint) <= 0.03:
+                                return base_candidate, iva_candidate
+
+                        if rate > 0 and abs((base_candidate * rate / 100.0) - iva_candidate) <= 0.06:
+                            return base_candidate, iva_candidate
 
         return None, None
 
