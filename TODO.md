@@ -19,3 +19,10 @@
   - [ ] 4.1 Ejecutar pytest
   - [ ] 4.2 Reescaneo real de `C:\Users\ignac\Downloads\1T26`
   - [ ] 4.3 Exportar CSV y auditar incoherencias objetivo
+
+- [ ] 5. Microfase activa: robustez OCR Saltoki (resumen base/iva/total)
+  - [x] 5.1 Reauditar `src/parsers/saltoki.py` y `tests/test_saltoki_parser.py`
+  - [ ] 5.2 Endurecer parseo de línea resumen OCR con IVA fragmentado por espacios
+  - [ ] 5.3 Añadir test de regresión para variante OCR más rota
+  - [ ] 5.4 Ejecutar `python -m pytest tests/test_saltoki_parser.py -q`
+  - [ ] 5.5 Ejecutar `python -m pytest -q`

@@ -230,3 +230,36 @@ def test_saltoki_benidorm_ocr_fragment_recovers_base_iva_total() -> None:
     assert result.subtotal == pytest.approx(118.04)
     assert result.iva == pytest.approx(24.79)
     assert result.total == pytest.approx(142.83)
+
+
+SALTOKI_BENIDORM_OCR_FRAGMENT_BROKEN_RATE_TEXT = """REF. PROVEEDOR
+F A C T U R A
+CLIENTE FECHA NÚMERO HOJA
+369718 31-01-2026 6475 1
+SALTOKI BENIDORM, S.L.
+CIF: B71406607 CUENCA MOYA, DANIEL
+N.I.F. 48334490J
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+118,04 2 1 , 0 0 24,79 142,83
+FORMA DE PAGO TOTAL
+TRANSFERENCIA A 30 IBAN..: ES52 0049 1821 0526 1068 2935
+142,83 €
+"""
+
+
+def test_saltoki_benidorm_ocr_fragment_with_split_rate_recovers_totals() -> None:
+    parser = SaltokiInvoiceParser()
+
+    result = parser.parse(
+        SALTOKI_BENIDORM_OCR_FRAGMENT_BROKEN_RATE_TEXT,
+        Path(r"C:\temp\saltoki\benidorm\Copia de 6475_20260131_40.pdf"),
+    )
+
+    assert result.parser_usado == "saltoki"
+    assert result.nombre_proveedor == "SALTOKI BENIDORM"
+    assert result.nif_proveedor == "B71406607"
+    assert result.numero_factura == "6475"
+    assert result.fecha_factura == "31-01-2026"
+    assert result.subtotal == pytest.approx(118.04)
+    assert result.iva == pytest.approx(24.79)
+    assert result.total == pytest.approx(142.83)

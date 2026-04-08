@@ -13,6 +13,7 @@ AMOUNT_TOKEN_PATTERN = re.compile(
 SALTOKI_SUMMARY_LINE_PATTERN = re.compile(
     r"^\s*(\d+(?:[.,]\d{1,2})?)\s+(\d{1,2}(?:[.,]\d{1,2})?)\s+(\d+(?:[.,]\d{1,2})?)\s+(\d+(?:[.,]\d{1,2})?)\s*$"
 )
+SALTOKI_SUMMARY_NUMERIC_TOKEN_PATTERN = re.compile(r"\d+(?:[.,]\d{1,2})?")
 
 HEADER_ROW_PATTERN = re.compile(
     r"^\s*\d+\s+([0-9]{2}[-/][0-9]{2}[-/][0-9]{4})\s+(\d+)\s+\d+\s*$",
@@ -215,6 +216,50 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
 
         return base, iva, total
 
+    def normalize_summary_candidate_line(self, raw_line: str) -> str:
+        line = re.sub(r"\s+", " ", raw_line).strip()
+        if not line:
+            return ""
+
+        line = re.sub(r"\s*([.,])\s*", r"\1", line)
+        line = re.sub(r"(\d)\s+([.,])", r"\1\2", line)
+        line = re.sub(r"([.,])\s+(\d)", r"\1\2", line)
+        line = re.sub(r"(?<=\d)\s+(?=\d\b)", "", line)
+
+        return line
+
+    def extract_amount_tokens_with_joined_pairs(self, line: str) -> list[float]:
+        raw_tokens = SALTOKI_SUMMARY_NUMERIC_TOKEN_PATTERN.findall(line)
+        values: list[float] = []
+
+        index = 0
+        while index < len(raw_tokens):
+            token = raw_tokens[index]
+            parsed = parse_amount(token)
+
+            if (
+                parsed is not None
+                and parsed.is_integer()
+                and 0 <= parsed <= 99
+                and index + 1 < len(raw_tokens)
+            ):
+                next_token = raw_tokens[index + 1]
+                next_parsed = parse_amount(next_token)
+                if next_parsed is not None and next_parsed.is_integer() and 0 <= next_parsed <= 99:
+                    merged_token = f"{int(parsed)}{int(next_parsed):02d}"
+                    merged_parsed = parse_amount(merged_token)
+                    if merged_parsed is not None:
+                        values.append(merged_parsed)
+                        index += 2
+                        continue
+
+            if parsed is not None:
+                values.append(parsed)
+
+            index += 1
+
+        return values
+
     def extract_summary_line_amounts(
         self,
         lines: list[str],
@@ -238,27 +283,38 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
                     candidate_lines.extend(raw_lines[index + 1:index + 8])
 
         for raw_line in candidate_lines:
-            line = re.sub(r"\s+", " ", raw_line).strip()
+            line = self.normalize_summary_candidate_line(raw_line)
             if not line:
                 continue
 
             match = SALTOKI_SUMMARY_LINE_PATTERN.match(line)
-            if not match:
+            if match:
+                base = parse_amount(match.group(1))
+                rate = parse_amount(match.group(2))
+                iva = parse_amount(match.group(3))
+                total = parse_amount(match.group(4))
+
+                if base is not None and iva is not None and total is not None:
+                    if rate is not None and round(rate, 2) in {4.00, 10.00, 21.00}:
+                        if abs((base + iva) - total) <= 0.03:
+                            return base, iva, total
+
+            token_values = self.extract_amount_tokens_with_joined_pairs(line)
+
+            if len(token_values) < 4:
                 continue
 
-            base = parse_amount(match.group(1))
-            rate = parse_amount(match.group(2))
-            iva = parse_amount(match.group(3))
-            total = parse_amount(match.group(4))
+            for index in range(len(token_values) - 3):
+                base = token_values[index]
+                rate = token_values[index + 1]
+                iva = token_values[index + 2]
+                total = token_values[index + 3]
 
-            if base is None or iva is None or total is None:
-                continue
+                if round(rate, 2) not in {4.00, 10.00, 21.00}:
+                    continue
 
-            if rate is None or round(rate, 2) not in {4.00, 10.00, 21.00}:
-                continue
-
-            if abs((base + iva) - total) <= 0.03:
-                return base, iva, total
+                if abs((base + iva) - total) <= 0.03:
+                    return base, iva, total
 
         return None, None, None
 
