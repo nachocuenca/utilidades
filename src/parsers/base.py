@@ -38,6 +38,21 @@ INVALID_INVOICE_NUMBER_VALUES = {
     "referencia",
     "documento",
 }
+GENERIC_NOISE_NAME_PATTERNS = (
+    re.compile(r"normativa vigente", re.IGNORECASE),
+    re.compile(r"empresa emisora", re.IGNORECASE),
+    re.compile(r"informaci[oó]n adicional", re.IGNORECASE),
+    re.compile(r"\breferencia\b", re.IGNORECASE),
+    re.compile(r"siempre cerca", re.IGNORECASE),
+    re.compile(r"\bbricolaje\b", re.IGNORECASE),
+    re.compile(r"construcci[oó]n", re.IGNORECASE),
+    re.compile(r"decoraci[oó]n", re.IGNORECASE),
+    re.compile(r"jardiner[ií]a", re.IGNORECASE),
+    re.compile(r"otnemucod", re.IGNORECASE),
+    re.compile(r"n[oó]icpircsn[ií]", re.IGNORECASE),
+    re.compile(r"^\s*ajoh\s*$", re.IGNORECASE),
+    re.compile(r"^\s*oilof\s*$", re.IGNORECASE),
+)
 CUSTOMER_LINE_PATTERN = re.compile(
     r"\b(cliente|clienta|destinatario|facturar a|bill to|comprador|titular)\b",
     re.IGNORECASE,
@@ -357,50 +372,83 @@ class BaseInvoiceParser(ABC):
         total_value = total_candidates[-1] if total_candidates else None
         return base_value, iva_value, total_value
 
+    def _is_credit_or_rectificativa(self, text: str) -> bool:
+        lowered = text.lower()
+        return any(
+            marker in lowered
+            for marker in (
+                "abono",
+                "factura rectificativa",
+                "rectificativa",
+                "devolucion",
+                "devolución",
+                "neto a pagar -",
+                "total -",
+                "importe a pagar -",
+            )
+        )
+
+    def _apply_credit_sign(self, text: str, value: float | None) -> float | None:
+        if value is None:
+            return None
+        if self._is_credit_or_rectificativa(text):
+            return -abs(value)
+        return value
+
     def extract_subtotal(self, text: str) -> float | None:
         summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
         if summary_base is not None and summary_iva is not None and summary_total is not None:
-            return summary_base
+            return self._apply_credit_sign(text, summary_base)
 
-        return self.extract_labeled_amount(
+        value = self.extract_labeled_amount(
             text,
             [
                 r"subtotal",
                 r"base\s+imponible",
                 r"importe\s+sin\s+iva",
                 r"total\s+antes\s+de\s+impuestos",
+                r"total\s+ai",
+                r"total\s+si",
             ],
             ignore_percent=True,
         )
+        return self._apply_credit_sign(text, value)
 
     def extract_iva(self, text: str) -> float | None:
         summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
         if summary_base is not None and summary_iva is not None and summary_total is not None:
-            return summary_iva
+            return self._apply_credit_sign(text, summary_iva)
 
-        return self.extract_labeled_amount(
+        value = self.extract_labeled_amount(
             text,
             [
                 r"cuota\s+iva",
                 r"importe\s+iva",
                 r"\biva\b",
+                r"impuesto",
+                r"importe\s+impuesto",
             ],
             ignore_percent=True,
         )
+        return self._apply_credit_sign(text, value)
 
     def extract_total(self, text: str) -> float | None:
         summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
         if summary_base is not None and summary_iva is not None and summary_total is not None:
-            return summary_total
+            return self._apply_credit_sign(text, summary_total)
 
-        return self.extract_labeled_amount(
+        value = self.extract_labeled_amount(
             text,
             [
+                r"neto\s+a\s+pagar",
                 r"importe\s+total",
                 r"total\s+factura",
+                r"total\s+ii",
+                r"total\s+tti",
                 r"\btotal\b",
             ],
         )
+        return self._apply_credit_sign(text, value)
 
     def extract_tax_id_from_text(self, text: str) -> str | None:
         label_patterns = [
@@ -504,6 +552,23 @@ class BaseInvoiceParser(ABC):
 
         return pick_best_name(candidates)
 
+    def is_probable_noise_name(self, value: str | None) -> bool:
+        if value is None:
+            return True
+
+        cleaned = clean_name_candidate(value)
+        if not cleaned:
+            return True
+
+        compact = re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", "", cleaned)
+        if compact and compact == compact[::-1] and len(compact) >= 8:
+            return True
+
+        if cleaned.count(".") >= 2 and len(compact) <= 4:
+            return True
+
+        return any(pattern.search(cleaned) for pattern in GENERIC_NOISE_NAME_PATTERNS)
+
     def extract_provider_from_top(self, lines: list[str], top_n: int = 8) -> str | None:
         candidates: list[str] = []
 
@@ -518,16 +583,6 @@ class BaseInvoiceParser(ABC):
             re.compile(r"total", re.IGNORECASE),
             re.compile(r"www\.", re.IGNORECASE),
             re.compile(r"^c/", re.IGNORECASE),
-            re.compile(r"referencia", re.IGNORECASE),
-            re.compile(r"normativa vigente", re.IGNORECASE),
-            re.compile(r"empresa emisora", re.IGNORECASE),
-            re.compile(r"siempre cerca", re.IGNORECASE),
-            re.compile(r"bricolaje", re.IGNORECASE),
-            re.compile(r"construcci[oó]n", re.IGNORECASE),
-            re.compile(r"decoraci[oó]n", re.IGNORECASE),
-            re.compile(r"jardiner[ií]a", re.IGNORECASE),
-            re.compile(r"otnemucod", re.IGNORECASE),
-            re.compile(r"n[oó]icpircsn[ií]", re.IGNORECASE),
         ]
 
         for line in lines[:top_n]:
@@ -536,6 +591,9 @@ class BaseInvoiceParser(ABC):
                 continue
 
             if any(pattern.search(cleaned) for pattern in ignore_patterns):
+                continue
+
+            if self.is_probable_noise_name(cleaned):
                 continue
 
             if is_valid_name_candidate(cleaned):

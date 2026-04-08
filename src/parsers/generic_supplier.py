@@ -13,6 +13,20 @@ TICKETISH_PATTERNS = (
 )
 
 
+SUPPLIER_FOLDER_ALIASES: dict[str, str] = {
+    "levantia": "Aislamientos Acústicos Levante, S.L.",
+    "davofrio": "DAVOFRIO, S.L.U.",
+    "leroy merlin": "LEROY MERLIN SLU",
+    "repsol": "REPSOL",
+    "obramat": "BRICOLAJE BRICOMAN, S.L.U.",
+    "saltoki benidorm": "SALTOKI BENIDORM, S.L.",
+    "saltoki alicante": "SALTOKI ALICANTE, S.L.",
+    "mercaluz": "Componentes Eléctricos Mercaluz S.A",
+}
+
+NOISY_PROVIDER_CANDIDATES = {"oiloF", "OILOF", "ajoH", "AJOH"}
+
+
 class GenericSupplierInvoiceParser(BaseInvoiceParser):
     parser_name = "generic_supplier"
     priority = 20
@@ -71,6 +85,17 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
 
         return result.finalize()
 
+    def _alias_from_file_path(self, file_path: str | Path) -> str | None:
+        path_text = self.get_path_text(file_path)
+        if not path_text:
+            return None
+
+        for key, value in SUPPLIER_FOLDER_ALIASES.items():
+            if key in path_text:
+                return value
+
+        return None
+
     def extract_supplier_name(self, lines: list[str], file_path: str | Path) -> str | None:
         provider = self.extract_name_near_labels(
             lines,
@@ -85,15 +110,41 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
             max_distance=3,
         )
 
-        if provider:
+        if provider and provider not in NOISY_PROVIDER_CANDIDATES and not self.is_probable_noise_name(provider):
             return provider
 
         top_provider = self.extract_provider_from_top(lines, top_n=8)
         if top_provider:
+            customer_name = self.extract_name_near_labels(
+                lines,
+                [
+                    r"^cliente\b",
+                    r"^clienta\b",
+                    r"^destinatario\b",
+                    r"^facturar a\b",
+                    r"^bill to\b",
+                    r"^comprador\b",
+                    r"^titular\b",
+                ],
+                max_distance=1,
+            )
+            if customer_name and top_provider.lower() == customer_name.lower():
+                top_provider = None
+
+        if top_provider and top_provider not in NOISY_PROVIDER_CANDIDATES and not self.is_probable_noise_name(top_provider):
             return top_provider
 
+        alias = self._alias_from_file_path(file_path)
+        if alias:
+            return alias
+
         folder_hint = self.get_folder_hint_name(file_path)
-        if folder_hint and folder_hint.lower() not in {"inbox", "data", "tickets"}:
+        if (
+            folder_hint
+            and folder_hint.lower() not in {"inbox", "data", "tickets"}
+            and not self.is_probable_noise_name(folder_hint)
+            and folder_hint not in NOISY_PROVIDER_CANDIDATES
+        ):
             return folder_hint
 
         return None

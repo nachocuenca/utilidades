@@ -78,3 +78,88 @@ def test_generic_supplier_skips_customer_tax_id_when_extracting_supplier() -> No
 
 def test_generic_parser_rejects_invoice_number_ocr_fragment() -> None:
     assert GenericInvoiceParser.clean_invoice_number_candidate("Direcci") is None
+
+
+def test_generic_supplier_ignores_noisy_provider_lines_from_csv_anomalies() -> None:
+    text = """
+    En cumplimiento de la normativa vigente es posible que el concepto esté incompleto.
+    Para más información sobre el cargo, debe dirigirse a la empresa emisora del mismo.
+    Información adicional Referencia
+    Fecha factura: 01/04/2026
+    Total factura: 16,15
+    Cliente: Daniel Cuenca Moya
+    NIF cliente: 48334490J
+    """
+    parser = GenericSupplierInvoiceParser()
+
+    result = parser.parse(text, Path("documento_ruidoso.pdf"))
+
+    assert result.nombre_proveedor is None
+    assert result.nif_proveedor is None
+    assert result.fecha_factura == "01-04-2026"
+    assert result.total == 16.15
+
+
+def test_base_parser_noise_detector_flags_reversed_or_fragmented_names() -> None:
+    parser = GenericSupplierInvoiceParser()
+
+    assert parser.is_probable_noise_name(")otnemucod") is True
+    assert parser.is_probable_noise_name(".F.I.N") is True
+    assert parser.is_probable_noise_name("Información adicional Referencia") is True
+    assert parser.is_probable_noise_name("FRANCISCO AMADOR GARCIA") is False
+
+
+def test_generic_supplier_uses_folder_alias_for_levantia_when_ocr_name_is_noisy() -> None:
+    text = """
+    77410930B
+    OILOF
+    Fecha factura: 20/03/2026
+    Total factura: 1576,63
+    Cliente: Daniel Cuenca Moya
+    NIF cliente: 48334490J
+    """
+    parser = GenericSupplierInvoiceParser()
+
+    result = parser.parse(text, Path(r"C:\tmp\1T 26\LEVANTIA\0100604203149.pdf"))
+
+    assert result.nombre_proveedor == "Aislamientos Acústicos Levante, S.L."
+    assert result.total == 1576.63
+
+
+def test_generic_supplier_uses_folder_alias_for_davofrio_when_top_name_is_garbage() -> None:
+    text = """
+    ajoH
+    Fecha factura: 26/03/2026
+    Base imponible 219,00
+    IVA 45,99
+    Total factura 264,99
+    Cliente: Daniel Cuenca Moya
+    NIF cliente: 48334490J
+    """
+    parser = GenericSupplierInvoiceParser()
+
+    result = parser.parse(text, Path(r"C:\tmp\1T 26\DAVOFRIO\FVC26-0381.pdf"))
+
+    assert result.nombre_proveedor == "DAVOFRIO, S.L.U."
+    assert result.subtotal == 219.0
+    assert result.iva == 45.99
+    assert result.total == 264.99
+
+
+def test_generic_supplier_marks_credit_note_amounts_as_negative() -> None:
+    text = """
+    ABONO
+    No factura : ABV2603-10000-002221
+    Fecha : 20/03/2026
+    Total AI 5,49
+    Impuesto 21,00 % sobre 5,49 1,15
+    Total II 6,64
+    NETO A PAGAR -6,64 EUR
+    """
+    parser = GenericSupplierInvoiceParser()
+
+    result = parser.parse(text, Path(r"C:\tmp\1T 26\MERCALUZ\ABV2603-10000-002221.pdf"))
+
+    assert result.subtotal == -5.49
+    assert result.iva == -1.15
+    assert result.total == -6.64
