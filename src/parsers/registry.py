@@ -5,8 +5,10 @@ from pathlib import Path
 
 from src.parsers.agus import AgusInvoiceParser
 from src.parsers.base import BaseInvoiceParser
+from src.parsers.davofrio import DavofrioInvoiceParser
 from src.parsers.edieuropa import EdieuropaInvoiceParser
 from src.parsers.eseaforms import EseaformsInvoiceParser
+from src.parsers.fempa import FempaInvoiceParser
 from src.parsers.generic import GenericInvoiceParser
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 from src.parsers.generic_ticket import GenericTicketInvoiceParser
@@ -18,6 +20,7 @@ from src.parsers.mercaluz import MercaluzInvoiceParser
 from src.parsers.obramat import ObramatInvoiceParser
 from src.parsers.repsol import RepsolInvoiceParser
 from src.parsers.saltoki import SaltokiInvoiceParser
+from src.parsers.versotel import VersotelInvoiceParser
 from src.parsers.wurth import WurthInvoiceParser
 
 
@@ -38,12 +41,15 @@ class ParserRegistry:
         self.register(SaltokiInvoiceParser())
         self.register(LeroyMerlinInvoiceParser())
         self.register(RepsolInvoiceParser())
+        self.register(DavofrioInvoiceParser())
         self.register(EseaformsInvoiceParser())
         self.register(EdieuropaInvoiceParser())
+        self.register(FempaInvoiceParser())
         self.register(LegalQualityInvoiceParser())
         self.register(MercaluzInvoiceParser())
         self.register(LevantiaInvoiceParser())
         self.register(WurthInvoiceParser())
+        self.register(VersotelInvoiceParser())
 
         # Ticket genérico
         self.register(GenericTicketInvoiceParser())
