@@ -10,6 +10,9 @@ from src.utils.amounts import parse_amount
 AMOUNT_TOKEN_PATTERN = re.compile(
     r"[+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{1,4})?"
 )
+SALTOKI_SUMMARY_LINE_PATTERN = re.compile(
+    r"^\s*(\d+(?:[.,]\d{1,2})?)\s+(\d{1,2}(?:[.,]\d{1,2})?)\s+(\d+(?:[.,]\d{1,2})?)\s+(\d+(?:[.,]\d{1,2})?)\s*$"
+)
 
 HEADER_ROW_PATTERN = re.compile(
     r"^\s*\d+\s+([0-9]{2}[-/][0-9]{2}[-/][0-9]{4})\s+(\d+)\s+\d+\s*$",
@@ -184,6 +187,10 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         if summary_base is not None and summary_iva is not None and summary_total is not None:
             return summary_base, summary_iva, summary_total
 
+        summary_line_base, summary_line_iva, summary_line_total = self.extract_summary_line_amounts(lines, text)
+        if summary_line_base is not None and summary_line_iva is not None and summary_line_total is not None:
+            return summary_line_base, summary_line_iva, summary_line_total
+
         total = self.extract_total_from_tail(lines, text)
         base, iva = self.extract_base_and_iva_from_tail(lines, total_hint=total)
 
@@ -207,6 +214,53 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
                 return base, iva, total
 
         return base, iva, total
+
+    def extract_summary_line_amounts(
+        self,
+        lines: list[str],
+        text: str,
+    ) -> tuple[float | None, float | None, float | None]:
+        target_indexes = [
+            index
+            for index, line in enumerate(lines)
+            if "base imponible" in line.lower() and "total" in line.lower()
+        ]
+
+        candidate_lines: list[str] = []
+        for index in target_indexes:
+            window = lines[index + 1:index + 8]
+            candidate_lines.extend(window)
+
+        if "BASE IMPONIBLE" in text.upper():
+            raw_lines = text.splitlines()
+            for index, line in enumerate(raw_lines):
+                if "BASE IMPONIBLE" in line.upper() and "TOTAL" in line.upper():
+                    candidate_lines.extend(raw_lines[index + 1:index + 8])
+
+        for raw_line in candidate_lines:
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if not line:
+                continue
+
+            match = SALTOKI_SUMMARY_LINE_PATTERN.match(line)
+            if not match:
+                continue
+
+            base = parse_amount(match.group(1))
+            rate = parse_amount(match.group(2))
+            iva = parse_amount(match.group(3))
+            total = parse_amount(match.group(4))
+
+            if base is None or iva is None or total is None:
+                continue
+
+            if rate is None or round(rate, 2) not in {4.00, 10.00, 21.00}:
+                continue
+
+            if abs((base + iva) - total) <= 0.03:
+                return base, iva, total
+
+        return None, None, None
 
     def extract_total_from_tail(self, lines: list[str], text: str) -> float | None:
         for line in reversed(lines[-15:]):
