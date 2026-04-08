@@ -32,10 +32,10 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
     priority = 20
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
-        if BaseInvoiceParser().looks_like_ticket_document(text, file_path):
+        if self.looks_like_ticket_document(text, file_path):
             return False
 
-        if not BaseInvoiceParser().looks_like_invoice_document(text):
+        if not self.looks_like_invoice_document(text):
             return False
 
         path_hint = self.get_folder_hint_name(file_path)

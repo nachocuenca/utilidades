@@ -4,6 +4,7 @@ from pathlib import Path
 
 from src.parsers.generic import GenericInvoiceParser
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
+from src.parsers.generic_ticket import GenericTicketInvoiceParser
 
 
 def test_generic_parser_extracts_core_fields(load_sample_text) -> None:
@@ -77,7 +78,7 @@ def test_generic_supplier_skips_customer_tax_id_when_extracting_supplier() -> No
 
 
 def test_generic_parser_rejects_invoice_number_ocr_fragment() -> None:
-    assert GenericInvoiceParser.clean_invoice_number_candidate("Direcci") is None
+    assert GenericInvoiceParser().clean_invoice_number_candidate("Direcci") is None
 
 
 def test_generic_supplier_ignores_noisy_provider_lines_from_csv_anomalies() -> None:
@@ -231,3 +232,72 @@ def test_generic_supplier_marks_credit_note_amounts_as_negative() -> None:
     assert result.subtotal == -5.49
     assert result.iva == -1.15
     assert result.total == -6.64
+
+
+# NUEVOS TESTS PARA GENERIC_TICKET MEJORADO
+def test_generic_ticket_rechaza_proveedor_ocr_basura_ticket() -> None:
+    """OCR basura en ticket rechazado."""
+    parser = GenericTicketInvoiceParser()
+    text = """
+ajoh
+OILOF
+.F.I.N
+FACTURA SIMPLIFICADA
+N OP: TK123
+TOTAL 54.20
+EFECTIVO 60
+    """
+    result = parser.parse(text, Path("ticket_ocr_basura.pdf"))
+    assert result.nombre_proveedor is None
+    assert result.status == "failed"
+
+
+def test_generic_ticket_nif_proveedor_no_coge_cliente() -> None:
+    """NIF proveedor ignora NIF cliente en ticket."""
+    text = """
+REPSOL
+B87654321
+FACTURA SIMPLIFICADA
+FECHA 08/04/2026
+TOTAL 54.20
+
+Cliente: Daniel
+NIF cliente 48334490J
+    """
+    parser = GenericTicketInvoiceParser()
+    result = parser.parse(text, Path("ticket_nif.pdf"))
+    assert result.nif_proveedor == "B87654321"
+    assert "48334490J" not in str(result)
+
+
+def test_generic_ticket_can_handle_rechaza_doc_largo_fiscal() -> None:
+    """Doc largo fiscal no entra en ticket."""
+    long_fiscal = "Base imponible\n" * 70 + "Cuota IVA\nTotal factura\nNIF A12345678\nCliente B87654321"
+    assert not GenericTicketInvoiceParser().can_handle(long_fiscal)
+
+
+def test_generic_ticket_can_handle_acepta_repsol_simplificada() -> None:
+    """Mantiene compatibilidad Repsol ticket."""
+    text = """
+REPSOL ESTACION DE SERVICIO
+FACTURA SIMPLIFICADA
+N° OP: 998877
+FECHA: 08/04/2026
+TOTAL: 54,20
+EFECTIVO: 60,00
+CAMBIO: 5,80
+    """
+    assert GenericTicketInvoiceParser().can_handle(text)
+    result = GenericTicketInvoiceParser().parse(text, Path("repsol_ticket.pdf"))
+    assert result.total == 54.2
+    assert result.parser_usado == "generic_ticket"
+
+
+def test_generic_ticket_extrae_total_final() -> None:
+    """Prioriza total en líneas finales."""
+    text = """
+Líneas productos...
+TOTAL 100.00
+    """
+    result = GenericTicketInvoiceParser().parse(text, Path("ticket_final_total.pdf"))
+    assert result.total == 100.0

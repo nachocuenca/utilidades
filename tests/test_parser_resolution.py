@@ -71,3 +71,16 @@ def test_specific_parser_needs_textual_confirmation_even_with_supplier_folder() 
     parser = resolve_parser(text, file_path=Path(r"C:\temp\mercaluz\mezcla\factura.pdf"))
 
     assert parser.parser_name == "generic_supplier"
+
+
+def test_mercaluz_selected_with_text_nif_abv() -> None:
+    text = """
+    MERCALUZ S.A.
+    NIF A03204864
+    FACTURA ABV2024-00123-456789
+    """
+    
+    parser = resolve_parser(text, file_path=Path(r"C:\temp\mercaluz\ABV2024-00123-456789.pdf"))
+    
+    assert parser.parser_name == "mercaluz"
+

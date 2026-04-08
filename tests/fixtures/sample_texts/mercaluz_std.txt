@@ -1,0 +1,22 @@
+MERCALUZ SA
+COMPONENTES ELECTRICOS
+C/ Industrial 123
+Alicante
+NIF: A03204864
+
+FACTURA Nº: FVN2024-00123-456789
+FECHA: 15/10/2024
+
+CLIENTE: Mi Empresa SL
+NIF: B87654321
+
+CONCEPTO                CANT  PRECIO   TOTAL
+Cable 2.5mm             10    1.20     12.00
+Interruptor simple      5     3.50     17.50
+
+BASE IMPONIBLE          29.50
+IVA 21%                 6.20
+TOTAL FACTURA           35.70 €
+
+Gracias por su compra
+

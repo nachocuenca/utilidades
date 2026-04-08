@@ -1,0 +1,13 @@
+Componentes Eléctricos Mercaluz S.A.
+A03204864
+C/ Luz 45 Alicante
+
+Nº Factura: FVN2024-01234-567890
+Fecha: 17/10/2024
+
+Base Imponible:           250.00
+Cuota IVA 21%:             52.50
+TOTAL A PAGAR:            302.50
+
+Nº Factura ABV2024-09876-112233 (anulada)
+
