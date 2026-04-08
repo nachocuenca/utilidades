@@ -123,15 +123,8 @@ class ParsedInvoiceData:
     subtotal: float | None = None
     iva: float | None = None
     total: float | None = None
-    tipo_documento: str = "factura"
-    status: str = "success"
-    failure_reason: str | None = None
-    texto_crudo: str = field(default="", repr=False)
-    metadatos: dict[str, str] = field(default_factory=dict, repr=False)
-
-    def mark_as_failed(self, reason: str | None = None) -> None:
-        self.status = "failed"
-        self.failure_reason = reason
+    texto_crudo: str = ""
+    metadatos: dict[str, str] = field(default_factory=dict)
 
     def finalize(self) -> "ParsedInvoiceData":
         self.nombre_proveedor = clean_name_candidate(self.nombre_proveedor)
