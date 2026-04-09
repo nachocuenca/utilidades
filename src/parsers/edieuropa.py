@@ -8,7 +8,7 @@ from src.utils.amounts import parse_amount
 
 
 INVOICE_LABEL_PATTERN = re.compile(
-    r"(?:n[\W_]*[ÂºÂ°o]?|no|num(?:ero)?)?\s*(?:de\s*)?factura\s*[:#\-]?\s*([^\n\r]+)",
+    "(?:n[\\W_]*(?:\u00ba|\u00b0|o)?|no|num(?:ero)?|n\u00famero)?\\s*(?:de\\s*)?factura\\s*[:#\\-]?\\s*([^\\n\\r]+)",
     re.IGNORECASE,
 )
 TAIL_WINDOW_LINES = 30
@@ -26,7 +26,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
     SUMMARY_PATTERNS = {
         "base": [
             r"base\s+imponible[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
-            r"subtotal(?:\s+art[Ã­i]culos)?[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
+            r"subtotal(?:\s+art[^\d\n\r]*)?[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
         ],
         "iva": [
             r"iva\s*\d*%?[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
@@ -49,7 +49,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         has_tax_id = self.SUPPLIER_TAX_ID.lower() in normalized_text
         has_company_context = any(
             marker in normalized_text
-            for marker in ("electrodom", "mÃ¡quinas", "maquinas", "electrodomÃ©sticos")
+            for marker in ("electrodom", "maquinas", "m\u00e1quinas", "electrodom\u00e9sticos")
         )
 
         return has_tax_id or (has_brand and (path_hint or has_company_context))
@@ -172,7 +172,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
 
         cleaned = re.sub(r"\s+", " ", value).strip()
         cleaned = re.sub(
-            r"^(?:n[\W_]*[ÂºÂ°o]?|no|num(?:ero)?|n[Ãºu]mero)\s*(?:de\s*)?(?:factura)?\s*[:#\-]?\s*",
+            "^(?:n[\\W_]*(?:\u00ba|\u00b0|o)?|no|num(?:ero)?|n\u00famero)\\s*(?:de\\s*)?(?:factura)?\\s*[:#\\-]?\\s*",
             "",
             cleaned,
             flags=re.IGNORECASE,
@@ -211,7 +211,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
             line_offset,
             [
                 (r"base\s+imponible", 100),
-                (r"subtotal(?:\s+art[Ã­i]culos)?", 90),
+                (r"\bsubtotal\b", 90),
             ],
             ignore_percent=True,
         )
