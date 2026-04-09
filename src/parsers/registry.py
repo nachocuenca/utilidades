@@ -37,9 +37,9 @@ class ParserRegistry:
 
     def _register_defaults(self) -> None:
         # Específicos alta prioridad
+        self.register(LeroyMerlinInvoiceParser())
         self.register(ObramatInvoiceParser())
         self.register(SaltokiInvoiceParser())
-        self.register(LeroyMerlinInvoiceParser())
         self.register(RepsolInvoiceParser())
         self.register(DavofrioInvoiceParser())
         self.register(EseaformsInvoiceParser())
