@@ -28,6 +28,10 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
 
     FEMPA_SUPPLIER_NAME = "Federaci\u00f3n de Empresarios del Metal de la provincia de Alicante"
     TGSS_SUPPLIER_NAME = "Tesorer\u00eda General de la Seguridad Social"
+    TGSS_COMPACT_SUPPLIER_MARKERS = (
+        "tesoreria general de",
+        "tgss",
+    )
 
     FEMPA_MARKERS = (
         "fed. empresarios del metal",
@@ -111,6 +115,7 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
         "iban",
         "sepa",
         "pagina",
+        "recibos seguridad social",
     )
     TGSS_CUSTOMER_CONTEXT_PATTERNS = (
         r"nombre(?:\s+y\s+apellidos)?",
@@ -219,6 +224,11 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
         profile: str,
         supplier_name: str | None,
     ) -> str | None:
+        if profile == "tgss":
+            compact_customer = self._extract_tgss_customer_name(lines)
+            if compact_customer:
+                return compact_customer
+
         candidate_groups = [
             self._extract_names_near_labels(
                 lines,
@@ -265,11 +275,20 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
                     return value
 
         if profile == "tgss":
+            compact_total = self._extract_tgss_compact_total(lines)
+            if compact_total is not None:
+                return compact_total
+
             return self._extract_amount_near_labels(
                 lines,
                 (r"importe",),
                 lookahead=self.LOOKAHEAD_LINES,
             )
+
+        if profile == "fempa":
+            compact_total = self._extract_amount_from_date_line(lines, minimum_dates=2)
+            if compact_total is not None:
+                return compact_total
 
         return None
 
@@ -309,6 +328,9 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
                     if candidate:
                         return candidate
 
+        if profile == "tgss":
+            return self._extract_tgss_compact_value_date(lines)
+
         return None
 
     def extract_reference_number(self, lines: list[str], profile: str) -> str | None:
@@ -341,6 +363,11 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
             candidate = self._extract_code_near_labels(lines, patterns, lookahead=4)
             if self._is_long_reference(candidate):
                 return candidate
+
+        if profile == "tgss":
+            compact_long_reference = self._extract_standalone_long_reference(lines)
+            if compact_long_reference:
+                return compact_long_reference
 
         for patterns in (receipt_patterns, factura_patterns, generic_reference_patterns, adeudo_patterns):
             candidate = self._extract_code_near_labels(lines, patterns, lookahead=4)
@@ -379,6 +406,32 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
                 break
 
         return candidates
+
+    def _extract_tgss_customer_name(self, lines: list[str]) -> str | None:
+        compact_line = self._find_tgss_compact_line(lines)
+        if compact_line:
+            normalized_line = self._normalize_for_matching(compact_line)
+            split_index = -1
+
+            for marker in self.TGSS_COMPACT_SUPPLIER_MARKERS:
+                split_index = normalized_line.find(marker)
+                if split_index >= 0:
+                    break
+
+            if split_index > 0:
+                candidate = clean_name_candidate(compact_line[:split_index])
+                if self._looks_like_human_name(candidate) and self._is_valid_role_name(candidate, role="customer"):
+                    return self._normalize_customer_name(candidate)
+
+        for index, line in enumerate(lines[1:], start=1):
+            if not IBAN_PATTERN.search(line):
+                continue
+
+            candidate = clean_name_candidate(lines[index - 1])
+            if self._looks_like_human_name(candidate) and self._is_valid_role_name(candidate, role="customer"):
+                return self._normalize_customer_name(candidate)
+
+        return None
 
     def _extract_name_before_supplier(
         self,
@@ -553,6 +606,31 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
                 return value
         return None
 
+    def _extract_last_decimal_amount(self, fragment: str) -> float | None:
+        value: float | None = None
+        for match in re.finditer(r"\b\d+[.,]\d{2,4}\b", fragment):
+            parsed = parse_amount(match.group(0))
+            if parsed is not None:
+                value = parsed
+        return value
+
+    def _extract_amount_from_date_line(
+        self,
+        lines: list[str],
+        *,
+        minimum_dates: int = 1,
+    ) -> float | None:
+        for line in lines:
+            raw_date_matches = re.findall(r"\b\d{1,4}[\/\-.]\d{1,2}[\/\-.]\d{1,4}\b", line)
+            if len(raw_date_matches) < minimum_dates:
+                continue
+
+            value = self._extract_first_decimal_amount(line)
+            if value is not None:
+                return value
+
+        return None
+
     def _extract_code_near_labels(
         self,
         lines: list[str],
@@ -686,6 +764,21 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
 
         return None
 
+    def _extract_standalone_long_reference(self, lines: list[str]) -> str | None:
+        for line in lines:
+            if IBAN_PATTERN.search(line):
+                continue
+
+            match = LONG_DIGIT_REFERENCE_PATTERN.search(line)
+            if not match:
+                continue
+
+            candidate = self._normalize_reference_candidate(match.group(0))
+            if self._is_long_reference(candidate):
+                return candidate
+
+        return None
+
     def _is_valid_role_name(self, candidate: str | None, *, role: str) -> bool:
         cleaned = clean_name_candidate(candidate)
         if cleaned is None or not is_valid_name_candidate(cleaned):
@@ -720,6 +813,37 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
             return False
 
         return True
+
+    def _find_tgss_compact_line(self, lines: list[str]) -> str | None:
+        for line in lines:
+            normalized_line = self._normalize_for_matching(line)
+            if not any(marker in normalized_line for marker in self.TGSS_COMPACT_SUPPLIER_MARKERS):
+                continue
+
+            if self._extract_first_decimal_amount(line) is None:
+                continue
+
+            if not extract_date_candidates(line):
+                continue
+
+            return line
+
+        return None
+
+    def _extract_tgss_compact_value_date(self, lines: list[str]) -> str | None:
+        compact_line = self._find_tgss_compact_line(lines)
+        if not compact_line:
+            return None
+
+        dates = extract_date_candidates(compact_line)
+        return dates[-1] if dates else None
+
+    def _extract_tgss_compact_total(self, lines: list[str]) -> float | None:
+        compact_line = self._find_tgss_compact_line(lines)
+        if not compact_line:
+            return None
+
+        return self._extract_last_decimal_amount(compact_line)
 
     def _normalize_for_matching(self, value: str) -> str:
         compact = " ".join((value or "").replace("\r", "\n").split()).lower()

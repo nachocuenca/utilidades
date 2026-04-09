@@ -1,134 +1,197 @@
 # Flujo de parsing
 
-## Entrada
+## Punto de entrada
 
-Puntos de entrada actuales:
-- Streamlit: pagina `src/ui/pages/1_Facturas.py`
+Hoy hay tres entradas reales:
+
+- Streamlit: `src/ui/pages/1_Facturas.py`
 - CLI: `python -m scripts.rescan`
-- API interna: `InvoiceScanner.scan()` o `InvoiceScanner.scan_file()`
+- servicio: `InvoiceScanner.scan()` / `InvoiceScanner.scan_file()`
 
-El scanner:
-1. Resuelve la carpeta de escaneo.
-2. Lista PDFs con `src/utils/files.py`.
-3. Calcula `sha256` para cada archivo.
-4. Puede omitir hashes ya conocidos con `--skip-known`.
+El scanner siempre parte de `src/services/scanner.py`.
 
-## Lectura del PDF
+## 1. Localizar PDFs
+
+`InvoiceScanner`:
+
+1. resuelve la carpeta a escanear
+2. lista PDFs con `src/utils/files.py`
+3. calcula `sha256`
+4. puede omitir hashes ya conocidos si se usa `skip_known`
+
+La persistencia se hace por `hash_archivo`, asi que el upsert es por contenido, no por nombre de fichero.
+
+## 2. Leer el PDF
 
 `src/pdf/reader.py` intenta en este orden:
+
 1. `pdfplumber`
 2. `pypdf`
 3. OCR con `pypdfium2` + `pytesseract` si el texto sigue siendo insuficiente y OCR esta habilitado
 
-El resultado guarda:
-- texto normalizado
-- numero de paginas
-- `extractor_origen`
+El resultado de lectura guarda:
 
-En el ultimo CSV vivo, todos los registros entraron por `pdfplumber`.
+- `text`
+- `page_count`
+- `extractor`
 
-## Clasificacion previa del documento
+En el CSV de referencia `facturas_20260409_090532.csv`, las `80` filas vienen de `pdfplumber`.
 
-La clasificacion previa vive en `InvoiceScanner._infer_document_type()`.
+## 3. Clasificacion documental previa
+
+Antes de mirar el registry, `InvoiceScanner` decide `tipo_documento` preliminar.
 
 Orden real:
-1. `ticket` si la ruta contiene `/tickets/` o la carpeta origen es `tickets`
-2. `no_fiscal` si `_looks_like_non_fiscal_document()` detecta TGSS, recibo bancario o administrativo
-3. `factura` en el resto de casos
 
-Marcadores reales de `no_fiscal`:
-- carpetas tipo `tgss`, `seguridad social`, `banco`, `recibos`, `administrativo`
-- texto tipo `tesoreria general de la seguridad social`, `rnt`, `rlt`, `titular de la domiciliacion`, `entidad emisora`, `recibo bancario`, `cargo en cuenta`
+1. `ticket` si la ruta contiene `/tickets/` o `carpeta_origen` es `tickets`
+2. `no_fiscal` si `_looks_like_non_fiscal_document()` detecta TGSS, recibo bancario o documento administrativo
+3. `factura` en el resto
+
+Marcadores `no_fiscal` reales:
+
+- carpetas como `tgss`, `seguridad social`, `banco`, `recibos`, `administrativo`
+- textos como `tesoreria general de la seguridad social`, `rnt`, `rlt`, `titular de la domiciliacion`, `entidad emisora`, `cargo en cuenta`
 - ausencia de marcadores fiscales fuertes cuando aparecen esas senales
 
-## Atajo `no_fiscal`
+## 4. Rama `no_fiscal`
 
-Si el documento se clasifica como `no_fiscal`:
-- no pasa por el registry
-- se guarda con `tipo_documento=no_fiscal`
-- `parser_usado=document_filter`
-- `requiere_revision_manual=True`
-- el motivo de revision explica que es un documento no fiscal
+Si el documento cae en `no_fiscal`:
 
-Esto es el comportamiento correcto actual del sistema.
+- no entra al registry
+- se parsea con `NonFiscalReceiptParser`
+- se persiste con `tipo_documento=no_fiscal`
+- se marca `requiere_revision_manual=True`
+- el motivo de revision deja constancia de que es un documento no fiscal
 
-## Resolucion del parser ganador
+Matiz importante:
+
+- el runtime actual toma `parser_usado` del propio `NonFiscalReceiptParser`, o sea `non_fiscal_receipt`
+- el CSV vivo de referencia todavia muestra `document_filter` en sus 6 filas `no_fiscal`
+
+Eso significa que el export disponible no valida todavia el comportamiento exacto del runtime actual en esa rama.
+
+## 5. Rama `factura` o `ticket`: resolver parser
 
 Si el documento no es `no_fiscal`, entra en `resolve_parser_with_trace()`.
 
 Reglas reales:
-- si el usuario fuerza parser, se usa ese parser sin evaluar los demas
-- en auto, el registry ordena parsers por `priority` descendente
-- el primer parser que devuelve `True` en `can_handle()` es el `selected_parser`
-- el trace `matched_parsers` guarda todos los parsers que devolvieron `True`, no solo el ganador
-- si ninguno devuelve `True`, cae a `generic`
 
-Puntos importantes:
-- `generic_ticket` puede ganar por ruta `/tickets/`
-- un hint de carpeta por si solo no deberia forzar un parser especifico sin evidencia textual
-- los empates de prioridad dependen del orden de registro actual
+- si el usuario fuerza parser, se usa ese parser directamente
+- si no, el registry ordena por `priority` descendente
+- si dos parsers empatan, manda el orden de registro en `ParserRegistry._register_defaults()`
+- el primer parser que devuelve `True` en `can_handle()` es el ganador
+- `matched_parsers` guarda todos los parsers que devolvieron `True`
+- si ninguno entra, cae a `generic`
 
-## Parseo y normalizacion
+Casos especiales:
 
-El parser ganador hace `parse(text, file_path)` y luego `finalize()`.
+- `generic_ticket` puede ganar solo por ruta `tickets`
+- `non_fiscal` nunca compite aqui
 
-`finalize()` aplica:
-- limpieza de nombres
-- normalizacion de NIF y codigo postal
-- normalizacion de fecha
-- limpieza de numero de factura
-- calculo de importes faltantes cuando hay suficientes campos
+## 6. Parsear y normalizar
+
+El parser ganador hace `parse(text, file_path)` y despues `finalize()`.
+
+`finalize()`:
+
+- limpia nombres
+- normaliza NIF
+- normaliza `cp_cliente`
+- normaliza fecha
+- limpia numero de factura
+- completa importes faltantes cuando hay evidencia suficiente
 
 Regla contable compartida:
-- si existe un bloque final coherente donde `base + iva = total`, ese bloque tiene preferencia
 
-## Cliente por defecto
+- si aparece un bloque final coherente donde `Base + IVA = Total`, ese bloque manda
 
-La regla no se aplica en todos los casos. Hoy solo se aplica si:
+Limite real:
+
+- esa regla por si sola no garantiza que la tripleta sea correcta
+- el CSV vivo actual de `edieuropa` demuestra que una tripleta puede sumar y aun asi estar mal mapeada
+
+## 7. Tipo documental final
+
+El scanner no persiste cualquier `tipo_documento` que devuelva el parser.
+
+Hoy solo persiste:
+
+- `factura`
+- `ticket`
+- `no_fiscal`
+
+Consecuencia real:
+
+- `mercaluz` puede devolver `tipo_documento=abono` internamente
+- aun asi, el scanner termina guardando esas filas como `factura` con importes negativos
+
+## 8. Contexto cliente por defecto
+
+El contexto cliente por defecto se aplica en `InvoiceScanner._apply_default_customer_context()`.
+
+Solo entra si se cumplen las tres condiciones:
+
 - `tipo_documento == "factura"`
 - `FORCE_DEFAULT_CUSTOMER_FOR_FACTURAS=true`
 - existe `carpeta_origen`
 
-Valores actuales del `.env` local:
+Valores configurados hoy en `.env`:
+
 - `DEFAULT_CUSTOMER_NAME=Daniel Cuenca Moya`
 - `DEFAULT_CUSTOMER_TAX_ID=48334490J`
+- `DEFAULT_CUSTOMER_POSTAL_CODE=03501`
 
-Implicacion practica:
-- en escaneos con carpetas por proveedor, el scanner puede corregir o completar cliente
-- en un inbox plano sin subcarpetas, esa ayuda no entra
+Que se ve en el CSV vivo:
 
-## Persistencia
+- `74/74` facturas tienen `nombre_cliente=Daniel Cuenca Moya`
+- `74/74` facturas tienen `nif_cliente=48334490J`
+- `0/74` facturas tienen `cp_cliente=03501`
 
-El scanner construye `InvoiceUpsertData` y hace upsert en SQLite por `hash_archivo`.
+Conclusion operativa:
 
-Columnas importantes:
+- nombre y NIF si estan materializados en el export vivo
+- `cp_cliente` existe en el runtime actual y en tests, pero no esta validado por el ultimo CSV disponible
+
+## 9. Guardado en SQLite
+
+El scanner construye `InvoiceUpsertData` y hace upsert con `InvoiceRepository.upsert()`.
+
+Campos clave persistidos:
+
 - `tipo_documento`
 - `parser_usado`
 - `extractor_origen`
 - `requiere_revision_manual`
 - `motivo_revision`
 - `carpeta_origen`
-- datos fiscales y `texto_crudo`
+- proveedor / cliente / NIF / CP
+- numero / fecha / subtotal / iva / total
+- `texto_crudo`
 
-Matices reales:
-- `matched_parsers` no se persiste
-- Mercaluz ABV puede poner importes negativos, pero la base sigue guardando `tipo_documento=factura`
+No se persiste:
 
-## Exportacion
+- `matched_parsers`
+
+## 10. Exportacion
 
 La exportacion vive en `src/services/exporter.py`.
 
 Comportamiento real:
+
 - genera `facturas_YYYYMMDD_HHMMSS.csv`
 - genera `facturas_YYYYMMDD_HHMMSS.xlsx`
 - escribe en `data/exports/`
-- en el snapshot `2026-04-09` la pagina principal de Streamlit esta centrada en escaneo, tabla y detalle; el soporte de export existe en la capa de servicio
 
-## Debug rapido
+La UI actual no expone un boton de exportacion. El soporte esta en:
 
-Si un caso falla:
-1. mirar `texto_crudo` en la vista detalle o en la base
-2. comprobar si fue filtrado como `no_fiscal`
-3. comprobar que parser gano y, si hace falta, reproducir con tests para ver `matched_parsers`
-4. revisar si la ruta y `carpeta_origen` daban contexto importante
-5. revisar el parser especifico antes de tocar `generic`
+- `InvoiceService.export_csv()`
+- `InvoiceService.export_xlsx()`
+
+## Donde mirar si un caso falla
+
+1. `texto_crudo` del detalle o de la base.
+2. `src/services/scanner.py` para ver si el problema es de clasificacion previa.
+3. `src/parsers/registry.py` para ver prioridad y desempate.
+4. el parser especifico del proveedor.
+5. `tests/test_scanner.py`, `tests/test_parser_resolution.py` y el test del parser afectado.
+6. `docs/estado_actual.md` para comprobar si el fallo ya existe en el CSV vivo de referencia.

@@ -232,6 +232,104 @@ def test_saltoki_benidorm_ocr_fragment_recovers_base_iva_total() -> None:
     assert result.total == pytest.approx(142.83)
 
 
+SALTOKI_ALICANTE_MULTIPAGE_FINAL_SUMMARY_TEXT = """REF. PROVEEDOR
+F A C T U R A
+CLIENTE FECHA NÚMERO HOJA
+369718 7-03-2026 13803 1
+SALTOKI ALICANTE, S.L.
+CIF: B71406623
+CUENCA MOYA, DANIEL
+48334490J
+IMP. BRUTO DESCUENTOS % CARGOS %
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+FORMA DE PAGO TOTAL
+€
+
+REF. PROVEEDOR
+F A C T U R A
+CLIENTE FECHA NÚMERO HOJA
+369718 7-03-2026 13803 2
+SALTOKI ALICANTE, S.L.
+CIF: B71406623
+CUENCA MOYA, DANIEL
+48334490J
+SUMA ANTERIOR ........> 2.134,99
+IMP. BRUTO DESCUENTOS % CARGOS %
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+FORMA DE PAGO TOTAL
+€
+
+REF. PROVEEDOR
+F A C T U R A
+CLIENTE FECHA NÚMERO HOJA
+369718 7-03-2026 13803 3
+SALTOKI ALICANTE, S.L.
+CIF: B71406623
+CUENCA MOYA, DANIEL
+48334490J
+SUMA ANTERIOR ........> 5.120,74
+IMP. BRUTO DESCUENTOS % CARGOS %
+5.120,74
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+5.120,74 21 , 0 0 1.075,36 6.196,10
+FORMA DE PAGO TOTAL
+TRANSFERENCIA A 30 IBAN..: ES69 0049 1821 0922 1068 2951
+6.196,10 €
+al
+ne
+sodiulcni
+lanosrep
+retcárac
+ed sotad
+sol
+áratart
+elbasnopseR
+lE
+.ikotlaS
+opurG
+led
+saserpme
+ed
+otser
+le
+omoc
+ísa
+,arutcaf
+etneserp
+al
+ed
+rosime
+le
+otnat
+nos
+otneimatart
+led
+selbasnopseR
+soL
+dadicavirP
+. 
+3-04-2026 6.196,10
+"""
+
+
+def test_saltoki_alicante_multipage_prefers_last_fiscal_summary_block() -> None:
+    parser = SaltokiInvoiceParser()
+
+    result = parser.parse(
+        SALTOKI_ALICANTE_MULTIPAGE_FINAL_SUMMARY_TEXT,
+        Path(r"C:\temp\saltoki\alicante\13803_20260307_38.pdf"),
+    )
+
+    assert result.parser_usado == "saltoki"
+    assert result.nombre_proveedor == "SALTOKI ALICANTE, S.L."
+    assert result.nif_proveedor == "B71406623"
+    assert result.numero_factura == "13803"
+    assert result.fecha_factura == "07-03-2026"
+    assert result.subtotal == pytest.approx(5120.74)
+    assert result.iva == pytest.approx(1075.36)
+    assert result.total == pytest.approx(6196.10)
+
+
 SALTOKI_BENIDORM_OCR_FRAGMENT_BROKEN_RATE_TEXT = """REF. PROVEEDOR
 F A C T U R A
 CLIENTE FECHA NÚMERO HOJA

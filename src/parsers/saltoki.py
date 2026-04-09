@@ -7,13 +7,13 @@ from src.parsers.base import ParsedInvoiceData
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 from src.utils.amounts import parse_amount
 
-AMOUNT_TOKEN_PATTERN = re.compile(
-    r"[+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{1,4})?"
-)
+SALTOKI_AMOUNT_PATTERN = r"(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{1,4})?"
+
+AMOUNT_TOKEN_PATTERN = re.compile(rf"[+-]?{SALTOKI_AMOUNT_PATTERN}")
 SALTOKI_SUMMARY_LINE_PATTERN = re.compile(
-    r"^\s*(\d+(?:[.,]\d{1,2})?)\s+(\d{1,2}(?:[.,]\d{1,2})?)\s+(\d+(?:[.,]\d{1,2})?)\s+(\d+(?:[.,]\d{1,2})?)\s*$"
+    rf"^\s*({SALTOKI_AMOUNT_PATTERN})\s+({SALTOKI_AMOUNT_PATTERN})\s+({SALTOKI_AMOUNT_PATTERN})\s+({SALTOKI_AMOUNT_PATTERN})\s*$"
 )
-SALTOKI_SUMMARY_NUMERIC_TOKEN_PATTERN = re.compile(r"\d+(?:[.,]\d{1,2})?")
+SALTOKI_SUMMARY_NUMERIC_TOKEN_PATTERN = re.compile(SALTOKI_AMOUNT_PATTERN)
 
 HEADER_ROW_PATTERN = re.compile(
     r"^\s*\d+\s+([0-9]{2}[-/][0-9]{2}[-/][0-9]{4})\s+(\d+)\s+\d+\s*$",
@@ -30,10 +30,7 @@ DATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-EURO_TOTAL_PATTERN = re.compile(
-    r"([0-9]+(?:[.,][0-9]+)?)\s*€",
-    re.IGNORECASE,
-)
+EURO_TOTAL_PATTERN = re.compile(rf"({SALTOKI_AMOUNT_PATTERN})\s*€", re.IGNORECASE)
 
 
 class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
@@ -204,6 +201,7 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         if not line:
             return ""
 
+        line = re.sub(r"\b(\d)\s+(\d)\s*,\s*(\d)\s*(\d)\b", r"\1\2.\3\4", line)
         line = re.sub(r"(\d+)\s*,\s*0\s*0", r"\1.00", line)
         line = re.sub(r"(\d+)\s*,\s*0\s+(\d)", r"\1.0\2", line)
         line = re.sub(r"(\d+)\s+,\s+(\d+)", r"\1.\2", line)
@@ -211,7 +209,6 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         line = re.sub(r"\s*([.,])\s*", r"\1", line)
         line = re.sub(r"(\d)\s+([.,])", r"\1\2", line)
         line = re.sub(r"([.,])\s+(\d)", r"\1\2", line)
-        line = re.sub(r"(?<=\d)\s+(?=\d)", "", line)
 
         return line
 
@@ -252,7 +249,7 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
 
         candidates = tail_lines + tail_text_lines
 
-        for raw_line in candidates:
+        for raw_line in reversed(candidates):
             if len(raw_line.strip()) < 10:
                 continue
 
@@ -273,7 +270,7 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
 
             tokens = self.extract_amount_tokens_with_joined_pairs(line)
             if len(tokens) >= 4:
-                for i in range(len(tokens) - 3):
+                for i in range(len(tokens) - 4, -1, -1):
                     base_c = tokens[i]
                     rate_c = tokens[i + 1]
                     iva_c = tokens[i + 2]
@@ -304,7 +301,7 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
                 if "BASE IMPONIBLE" in line.upper() and "TOTAL" in line.upper():
                     candidate_lines.extend(raw_lines[index + 1 : index + 8])
 
-        for raw_line in candidate_lines:
+        for raw_line in reversed(candidate_lines):
             line = self.normalize_summary_candidate_line(raw_line)
             if not line:
                 continue
@@ -326,7 +323,7 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
             if len(token_values) < 4:
                 continue
 
-            for index in range(len(token_values) - 3):
+            for index in range(len(token_values) - 4, -1, -1):
                 base = token_values[index]
                 rate = token_values[index + 1]
                 iva = token_values[index + 2]
