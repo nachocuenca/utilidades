@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.parsers.base import ParsedInvoiceData
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
+from src.utils.amounts import calculate_missing_amounts
 
 MERCALUZ_INVOICE_NUMBER_PATTERN = re.compile(
     r"\b((?:ABV|FVN|VN)\d{4}-\d{5}-\d{5,6})\b",
@@ -84,14 +85,14 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
 
         result.numero_factura = self.extract_mercaluz_invoice_number(file_path, text)
         document_kind = self.detect_mercaluz_document_kind(file_path, text, result.numero_factura)
-        is_credit_note = document_kind == "ABV"
-        result.tipo_documento = "abono" if is_credit_note else "factura"
+        result.tipo_documento = "abono" if document_kind == "ABV" else "factura"
         result.fecha_factura = self.extract_filename_date(file_path) or self.extract_date(text)
 
         subtotal, iva, total = self.extract_mercaluz_amounts(text)
-        result.subtotal = self.apply_mercaluz_document_sign(subtotal, is_credit_note)
-        result.iva = self.apply_mercaluz_document_sign(iva, is_credit_note)
-        result.total = self.apply_mercaluz_document_sign(total, is_credit_note)
+        subtotal, iva, total = calculate_missing_amounts(subtotal, iva, total)
+        result.subtotal = self.apply_mercaluz_document_sign(subtotal, document_kind)
+        result.iva = self.apply_mercaluz_document_sign(iva, document_kind)
+        result.total = self.apply_mercaluz_document_sign(total, document_kind)
 
         return result.finalize()
 
@@ -134,7 +135,7 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
             if candidate.startswith(("FVN", "VN")):
                 return "FVN"
 
-        for line in self.extract_lines(text)[:25]:
+        for line in self.extract_lines(text):
             lowered = line.lower()
             if "anulad" in lowered:
                 continue
@@ -149,31 +150,7 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
             if prefix.startswith(("FVN", "VN")):
                 return "FVN"
 
-        lowered_text = text.lower()
-        if any(
-            marker in lowered_text
-            for marker in (
-                "abono",
-                "rectificativa",
-                "devolucion",
-                "devoluciÃ³n",
-            )
-        ):
-            return "ABV"
-
         return "FVN"
-
-    def is_mercaluz_credit_note(self, text: str) -> bool:
-        lowered_text = text.lower()
-        return any(
-            marker in lowered_text
-            for marker in (
-                "abono",
-                "rectificativa",
-                "devolucion",
-                "devolución",
-            )
-        )
 
     def extract_mercaluz_amounts(self, text: str) -> tuple[float | None, float | None, float | None]:
         lines = self.extract_lines(text)
@@ -237,14 +214,74 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
         if iva_value is not None and total_value is not None and base_value is None:
             base_value = round(total_value - iva_value, 4)
 
+        if base_value is None or iva_value is None or total_value is None:
+            fallback_base, fallback_iva, fallback_total = self.extract_mercaluz_shared_amount_fallback(text)
+            if base_value is None:
+                base_value = fallback_base
+            if iva_value is None:
+                iva_value = fallback_iva
+            if total_value is None:
+                total_value = fallback_total
+
         return base_value, iva_value, total_value
+
+    def extract_mercaluz_shared_amount_fallback(
+        self,
+        text: str,
+    ) -> tuple[float | None, float | None, float | None]:
+        base_value = self.extract_labeled_amount(
+            text,
+            [
+                r"subtotal",
+                r"base\s+imponible",
+                r"importe\s+sin\s+iva",
+                r"total\s+ai",
+            ],
+            ignore_percent=True,
+        )
+        iva_value = self.extract_labeled_amount(
+            text,
+            [
+                r"cuota\s+iva",
+                r"importe\s+iva",
+                r"\biva\b",
+                r"impuesto",
+            ],
+            ignore_percent=True,
+        )
+
+        total_value = None
+        for label_patterns in (
+            [r"total\s+factura"],
+            [r"importe\s+total"],
+            [r"total\s+a\s*pagar"],
+            [r"importe\s+a\s*pagar"],
+            [r"neto\s+a\s*pagar"],
+            [r"\btotal\b"],
+        ):
+            total_value = self.extract_labeled_amount(text, label_patterns)
+            if total_value is not None:
+                break
+
+        summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
+        if base_value is None:
+            base_value = summary_base
+        if iva_value is None:
+            iva_value = summary_iva
+        if total_value is None:
+            total_value = summary_total
+
+        return tuple(
+            abs(value) if value is not None else None
+            for value in (base_value, iva_value, total_value)
+        )
 
     def extract_mercaluz_final_summary_block(
         self,
         lines: list[str],
         line_offset: int,
     ) -> tuple[float | None, float | None, float | None] | None:
-        best_score: int | None = None
+        best_score: tuple[int, ...] | None = None
         best_triplet: tuple[float, float, float] | None = None
 
         for relative_start, line in enumerate(lines):
@@ -275,33 +312,46 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
                 if triplet is None:
                     continue
 
-                score = (line_offset + relative_end) * 1000 - (relative_end - relative_start)
-                if "total factura" in window_text:
-                    score += 600
-                elif "importe total" in window_text:
-                    score += 500
-                elif "total a pagar" in window_text:
-                    score += 200
-                elif "importe a pagar" in window_text or "neto a pagar" in window_text:
-                    score += 120
-
-                if "cuota iva" in window_text or "importe iva" in window_text:
-                    score += 250
-                if "base imponible" in window_text:
-                    score += 150
-
-                if (
-                    any(marker in window_text for marker in MERCALUZ_TOTAL_NOISE_MARKERS)
-                    and "total factura" not in window_text
-                    and "importe total" not in window_text
-                ):
-                    score -= 400
+                score = self.score_mercaluz_summary_window(
+                    window_text,
+                    line_offset + relative_end,
+                    relative_end - relative_start,
+                )
 
                 if best_score is None or score > best_score:
                     best_score = score
                     best_triplet = triplet
 
         return best_triplet
+
+    def score_mercaluz_summary_window(
+        self,
+        window_text: str,
+        window_end_index: int,
+        window_span: int,
+    ) -> tuple[int, ...]:
+        has_total_factura = "total factura" in window_text
+        has_importe_total = "importe total" in window_text
+        has_total_a_pagar = "total a pagar" in window_text
+        has_importe_a_pagar = "importe a pagar" in window_text or "neto a pagar" in window_text
+        has_explicit_iva = "cuota iva" in window_text or "importe iva" in window_text
+        has_explicit_base = "base imponible" in window_text
+        contaminated_secondary_total = (
+            any(marker in window_text for marker in MERCALUZ_TOTAL_NOISE_MARKERS)
+            and not (has_total_factura or has_importe_total)
+        )
+
+        return (
+            1 if has_total_factura else 0,
+            1 if has_importe_total else 0,
+            0 if contaminated_secondary_total else 1,
+            1 if has_explicit_iva else 0,
+            1 if has_explicit_base else 0,
+            1 if has_total_a_pagar else 0,
+            1 if has_importe_a_pagar else 0,
+            window_end_index,
+            -window_span,
+        )
 
     def is_mercaluz_summary_anchor(self, line: str) -> bool:
         lowered = line.lower()
@@ -455,6 +505,9 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
             if not candidate_entries:
                 continue
 
+            if "cuota iva" not in lowered and "importe iva" not in lowered and "impuesto" not in lowered:
+                candidate_entries = self.filter_mercaluz_generic_iva_candidates(candidate_entries)
+
             for value, amount_index, source_line, from_following_line in candidate_entries:
                 normalized_value = abs(value)
 
@@ -483,6 +536,24 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
                 )
 
         return candidates
+
+    def filter_mercaluz_generic_iva_candidates(
+        self,
+        candidate_entries: list[tuple[float, int, str, bool]],
+    ) -> list[tuple[float, int, str, bool]]:
+        if len(candidate_entries) < 2:
+            return candidate_entries
+
+        filtered_entries = [
+            candidate
+            for index, candidate in enumerate(candidate_entries)
+            if not (
+                candidate[3]
+                and index < len(candidate_entries) - 1
+                and round(abs(candidate[0]), 2) in MERCALUZ_COMMON_IVA_RATES
+            )
+        ]
+        return filtered_entries or candidate_entries
 
     def collect_mercaluz_total_candidates(
         self,
@@ -687,9 +758,9 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
         )
         return best_candidate
 
-    def apply_mercaluz_document_sign(self, value: float | None, is_credit_note: bool) -> float | None:
+    def apply_mercaluz_document_sign(self, value: float | None, document_kind: str) -> float | None:
         if value is None:
             return None
-        if is_credit_note:
+        if document_kind == "ABV":
             return -abs(value)
         return abs(value)

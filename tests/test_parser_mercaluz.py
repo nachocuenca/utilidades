@@ -94,3 +94,85 @@ def test_mercaluz_prefers_coherent_final_block_over_iva_rate() -> None:
     assert result.iva == -52.50
     assert result.total == -302.50
 
+
+def test_mercaluz_detects_fvn_from_document_number_not_credit_words() -> None:
+    text = """
+    MERCALUZ SA
+    NIF A03204864
+    FACTURA FVN2024-00002-123456
+    Fecha: 18/10/2024
+
+    Observaciones: abono por transferencia y devolucion interna
+
+    BASE IMPONIBLE
+    250,00
+    IVA
+    21,00
+    52,50
+    TOTAL FACTURA
+    302,50
+    """
+
+    parser = MercaluzInvoiceParser()
+
+    assert parser.detect_mercaluz_document_kind(
+        Path("mercaluz/FVN2024-00002-123456.pdf"),
+        text,
+        "FVN2024-00002-123456",
+    ) == "FVN"
+
+    result = parser.parse(text, Path("mercaluz/FVN2024-00002-123456.pdf"))
+
+    assert result.tipo_documento == "factura"
+    assert result.subtotal == 250.00
+    assert result.iva == 52.50
+    assert result.total == 302.50
+
+
+def test_mercaluz_ignores_21_amount_when_real_iva_quota_comes_after() -> None:
+    text = """
+    MERCALUZ SA
+    NIF A03204864
+    FACTURA FVN2024-00003-123456
+    Fecha: 19/10/2024
+
+    BASE IMPONIBLE
+    250,00
+    CUOTA IVA
+    21,00
+    52,50
+    TOTAL FACTURA
+    302,50
+    """
+
+    parser = resolve_parser(text, file_path=Path("mercaluz/FVN2024-00003-123456.pdf"))
+    result = parser.parse(text, Path("mercaluz/FVN2024-00003-123456.pdf"))
+
+    assert result.parser_usado == "mercaluz"
+    assert result.subtotal == 250.00
+    assert result.iva == 52.50
+    assert result.total == 302.50
+
+
+def test_mercaluz_prefers_total_factura_over_contaminated_importe_a_pagar() -> None:
+    text = """
+    MERCALUZ SA
+    NIF A03204864
+    FACTURA FVN2024-00004-123456
+    Fecha: 20/10/2024
+
+    BASE IMPONIBLE            250,00
+    CUOTA IVA 21%             52,50
+    TOTAL FACTURA             302,50
+    DESCUENTO PRONTO PAGO     -10,00
+    IMPORTE A PAGAR           292,50
+    """
+
+    parser = resolve_parser(text, file_path=Path("mercaluz/FVN2024-00004-123456.pdf"))
+    result = parser.parse(text, Path("mercaluz/FVN2024-00004-123456.pdf"))
+
+    assert result.parser_usado == "mercaluz"
+    assert result.subtotal == 250.00
+    assert result.iva == 52.50
+    assert result.total == 302.50
+
