@@ -54,7 +54,17 @@ class InvoiceExporter:
         self.export_dir = Path(export_dir or settings.export_dir).resolve()
 
     def build_dataframe(self, search: str | None = None) -> pd.DataFrame:
-        rows = self.repository.list_for_export(search=search)
+        return self.build_filtered_dataframe(search=search)
+
+    def build_filtered_dataframe(
+        self,
+        search: str | None = None,
+        tipo_documento: str | None = None,
+    ) -> pd.DataFrame:
+        rows = self.repository.list_for_export(
+            search=search,
+            tipo_documento=tipo_documento,
+        )
 
         if not rows:
             return pd.DataFrame(columns=EXPORT_COLUMNS)
@@ -67,8 +77,15 @@ class InvoiceExporter:
 
         return dataframe[EXPORT_COLUMNS]
 
-    def build_csv_dataframe(self, search: str | None = None) -> pd.DataFrame:
-        dataframe = self.build_dataframe(search=search).copy()
+    def build_csv_dataframe(
+        self,
+        search: str | None = None,
+        tipo_documento: str | None = None,
+    ) -> pd.DataFrame:
+        dataframe = self.build_filtered_dataframe(
+            search=search,
+            tipo_documento=tipo_documento,
+        ).copy()
 
         for column in CSV_MONETARY_COLUMNS:
             dataframe[column] = dataframe[column].map(self._format_monetary_value)
@@ -93,8 +110,15 @@ class InvoiceExporter:
 
         return format(amount, "f").replace(".", ",")
 
-    def export_csv(self, search: str | None = None) -> Path:
-        dataframe = self.build_csv_dataframe(search=search)
+    def export_csv(
+        self,
+        search: str | None = None,
+        tipo_documento: str | None = None,
+    ) -> Path:
+        dataframe = self.build_csv_dataframe(
+            search=search,
+            tipo_documento=tipo_documento,
+        )
         output_path = build_export_path(
             export_dir=self.export_dir,
             prefix="facturas",
@@ -109,8 +133,15 @@ class InvoiceExporter:
         )
         return output_path
 
-    def export_xlsx(self, search: str | None = None) -> Path:
-        dataframe = self.build_dataframe(search=search)
+    def export_xlsx(
+        self,
+        search: str | None = None,
+        tipo_documento: str | None = None,
+    ) -> Path:
+        dataframe = self.build_filtered_dataframe(
+            search=search,
+            tipo_documento=tipo_documento,
+        )
         output_path = build_export_path(
             export_dir=self.export_dir,
             prefix="facturas",

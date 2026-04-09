@@ -74,3 +74,42 @@ def test_export_csv_uses_spanish_excel_format_for_monetary_columns(tmp_path: Pat
     assert pd.isna(exported.loc[1, "subtotal"])
     assert pd.isna(exported.loc[1, "iva"])
     assert exported.loc[1, "total"] == pytest.approx(48.76)
+
+
+def test_export_csv_respects_document_type_filter(tmp_path: Path) -> None:
+    repository = InvoiceRepository(db_path=tmp_path / "app.db")
+    exporter = InvoiceExporter(repository=repository, export_dir=tmp_path / "exports")
+
+    repository.upsert(
+        InvoiceUpsertData(
+            archivo="factura_filtrada.pdf",
+            ruta_archivo=str(tmp_path / "factura_filtrada.pdf"),
+            hash_archivo="hash-filter-1",
+            tipo_documento="factura",
+            subtotal=118.04,
+            iva=24.79,
+            total=142.83,
+            texto_crudo="Factura",
+        )
+    )
+    repository.upsert(
+        InvoiceUpsertData(
+            archivo="ticket_filtrado.pdf",
+            ruta_archivo=str(tmp_path / "ticket_filtrado.pdf"),
+            hash_archivo="hash-filter-2",
+            tipo_documento="ticket",
+            total=9.99,
+            texto_crudo="Ticket",
+        )
+    )
+
+    output_path = exporter.export_csv(tipo_documento="factura")
+
+    with output_path.open("r", encoding="utf-8-sig", newline="") as file_handler:
+        rows = list(csv.DictReader(file_handler, delimiter=";"))
+
+    assert len(rows) == 1
+    assert rows[0]["tipo_documento"] == "factura"
+    assert rows[0]["subtotal"] == "118,04"
+    assert rows[0]["iva"] == "24,79"
+    assert rows[0]["total"] == "142,83"

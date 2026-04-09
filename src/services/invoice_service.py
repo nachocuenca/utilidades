@@ -219,8 +219,22 @@ class InvoiceService:
             "updated_at": record.updated_at,
         }
 
-    def export_csv(self, search: str | None = None) -> Path:
-        return self.exporter.export_csv(search=search)
+    def export_csv(
+        self,
+        search: str | None = None,
+        tipo_documento: str | None = None,
+    ) -> Path:
+        return self.exporter.export_csv(
+            search=search,
+            tipo_documento=tipo_documento,
+        )
 
-    def export_xlsx(self, search: str | None = None) -> Path:
-        return self.exporter.export_xlsx(search=search)
+    def export_xlsx(
+        self,
+        search: str | None = None,
+        tipo_documento: str | None = None,
+    ) -> Path:
+        return self.exporter.export_xlsx(
+            search=search,
+            tipo_documento=tipo_documento,
+        )
