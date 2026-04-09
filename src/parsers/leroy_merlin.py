@@ -15,7 +15,7 @@ SUPPLIER_NAME_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         re.compile(r"\bleroy\s+merlin\s+s\.?\s*l\.?\s*u\.?\b", re.IGNORECASE),
-        "Leroy Merlin S.L.U.",
+        "Leroy Merlin Espana S.L.U.",
     ),
 )
 
@@ -100,7 +100,6 @@ class LeroyMerlinInvoiceParser(BaseInvoiceParser):
     priority = 520
 
     SUPPLIER_NAME = "Leroy Merlin Espana S.L.U."
-    SUPPLIER_SHORT_NAME = "Leroy Merlin S.L.U."
     SUPPLIER_TAX_ID = "B84818442"
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
@@ -459,13 +458,15 @@ class LeroyMerlinInvoiceParser(BaseInvoiceParser):
         if "leroy merlin" not in normalized_block:
             return None
 
-        if "espana" in normalized_block or self._contains_known_supplier_tax_id("\n".join(supplier_block)):
+        if (
+            "espana" in normalized_block
+            or "slu" in normalized_block
+            or "s l u" in normalized_block
+            or self._contains_known_supplier_tax_id("\n".join(supplier_block))
+        ):
             return self.SUPPLIER_NAME
 
-        if "slu" in normalized_block or "s l u" in normalized_block:
-            return self.SUPPLIER_SHORT_NAME
-
-        return None
+        return self.SUPPLIER_NAME
 
     def _extract_customer_tax_ids(self, lines: list[str]) -> set[str]:
         customer_tax_ids: set[str] = set()

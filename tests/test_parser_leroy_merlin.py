@@ -124,6 +124,8 @@ def test_leroy_merlin_extracts_runtime_totals_and_customer_cp(
     )
 
     assert result.parser_usado == "leroy_merlin"
+    assert result.nombre_proveedor == "Leroy Merlin Espana S.L.U."
+    assert result.nif_proveedor == "B84818442"
     assert result.numero_factura == invoice_number
     assert result.fecha_factura == invoice_date
     assert result.cp_cliente == "03501"
