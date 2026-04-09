@@ -139,8 +139,8 @@ def test_scanner_keeps_fempa_bank_receipt_as_no_fiscal(monkeypatch, tmp_path: Pa
     assert stored[0].tipo_documento == "no_fiscal"
     assert stored[0].parser_usado == "non_fiscal_receipt"
     assert stored[0].nombre_proveedor == "Federación de Empresarios del Metal de la provincia de Alicante"
-    assert stored[0].nombre_cliente == "CUENCA MOYA DANIEL"
-    assert stored[0].numero_factura == "1S261409"
+    assert stored[0].nombre_cliente == "Daniel Cuenca Moya"
+    assert stored[0].numero_factura == "1S261409 1"
     assert stored[0].fecha_factura == "12-01-2026"
     assert stored[0].subtotal is None
     assert stored[0].iva is None

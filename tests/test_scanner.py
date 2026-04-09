@@ -278,10 +278,13 @@ def test_scanner_extracts_minimal_fields_for_tgss_no_fiscal_receipt(monkeypatch,
     tgss_text = """
     TESORERIA GENERAL DE LA SEGURIDAD SOCIAL
     Recibo de liquidacion de cotizaciones
-    Razon social: AUTONOMOS PRUEBA SL
-    Fecha de valor: 28/03/2026
-    Importe del recibo: 523,17 EUR
-    Referencia: TGSS-03/2026-0001
+    Sujeto responsable
+    DANIEL CUENCA MOYA
+    Fecha de operacion: 20/05/2021
+    Fecha de valor: 21/05/2021
+    Importe del recibo: 446,62 EUR
+    Referencia:
+    052107031089616611202105210047
     Numero de recibo: 011234567890
     """
 
@@ -306,13 +309,13 @@ def test_scanner_extracts_minimal_fields_for_tgss_no_fiscal_receipt(monkeypatch,
     assert stored[0].tipo_documento == "no_fiscal"
     assert stored[0].parser_usado == "non_fiscal_receipt"
     assert stored[0].nombre_proveedor == "Tesorería General de la Seguridad Social"
-    assert stored[0].nombre_cliente == "AUTONOMOS PRUEBA SL"
-    assert stored[0].numero_factura == "TGSS-03/2026-0001"
-    assert stored[0].fecha_factura == "28-03-2026"
+    assert stored[0].nombre_cliente == "Daniel Cuenca Moya"
+    assert stored[0].numero_factura == "052107031089616611202105210047"
+    assert stored[0].fecha_factura == "21-05-2021"
     assert stored[0].subtotal is None
     assert stored[0].iva is None
     assert stored[0].nif_proveedor is None
-    assert stored[0].total == 523.17
+    assert stored[0].total == 446.62
 
 
 def test_scanner_extracts_minimal_fields_for_bank_receipt_no_fiscal(monkeypatch, tmp_path: Path) -> None:
