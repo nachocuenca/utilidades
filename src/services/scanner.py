@@ -6,12 +6,13 @@ from pathlib import Path
 from config.settings import get_settings
 from src.db.models import InvoiceUpsertData
 from src.db.repositories import InvoiceRepository
+from src.parsers.non_fiscal_receipt import NonFiscalReceiptParser
 from src.parsers.registry import resolve_parser_with_trace
 from src.pdf.ocr import has_meaningful_text
 from src.pdf.reader import read_pdf_text
 from src.utils.files import list_pdf_files
 from src.utils.hashing import sha256_file
-from src.utils.ids import normalize_tax_id
+from src.utils.ids import normalize_postal_code, normalize_tax_id
 
 
 @dataclass(slots=True)
@@ -109,6 +110,7 @@ class InvoiceScanner:
         self.settings = settings
         self.repository = repository or InvoiceRepository()
         self.inbox_dir = Path(inbox_dir or settings.inbox_dir).resolve()
+        self.non_fiscal_receipt_parser = NonFiscalReceiptParser()
 
     def resolve_scan_dir(self, inbox_dir: str | Path | None = None) -> Path:
         if inbox_dir is None:
@@ -220,12 +222,16 @@ class InvoiceScanner:
 
         default_name = self.settings.default_customer_name.strip()
         default_tax_id = normalize_tax_id(self.settings.default_customer_tax_id)
+        default_postal_code = normalize_postal_code(self.settings.default_customer_postal_code)
 
         if default_name:
             upsert_data.nombre_cliente = default_name
 
         if default_tax_id:
             upsert_data.nif_cliente = default_tax_id
+
+        if default_postal_code:
+            upsert_data.cp_cliente = default_postal_code
 
     def _should_apply_default_customer_context(
         self,
@@ -362,24 +368,31 @@ class InvoiceScanner:
             else:
                 review_reason = non_fiscal_reason
 
+            parsed_non_fiscal = self.non_fiscal_receipt_parser.parse(read_result.text, pdf_path)
+
             upsert_data = InvoiceUpsertData(
                 archivo=pdf_path.name,
                 ruta_archivo=str(pdf_path.resolve()),
                 hash_archivo=file_hash,
                 tipo_documento="no_fiscal",
-                parser_usado="document_filter",
+                parser_usado=parsed_non_fiscal.parser_usado,
                 extractor_origen=read_result.extractor,
                 requiere_revision_manual=True,
                 motivo_revision=review_reason,
                 carpeta_origen=folder_origin,
-                texto_crudo=read_result.text,
+                nombre_proveedor=parsed_non_fiscal.nombre_proveedor,
+                nombre_cliente=parsed_non_fiscal.nombre_cliente,
+                numero_factura=parsed_non_fiscal.numero_factura,
+                fecha_factura=parsed_non_fiscal.fecha_factura,
+                total=parsed_non_fiscal.total,
+                texto_crudo=parsed_non_fiscal.texto_crudo,
             )
 
             invoice_id = self.repository.upsert(upsert_data)
             return {
                 "invoice_id": invoice_id,
                 "requires_review": True,
-                "matched_parsers": ["document_filter"],
+                "matched_parsers": [parsed_non_fiscal.parser_usado],
                 "document_type": "no_fiscal",
             }
 

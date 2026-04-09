@@ -55,6 +55,7 @@ class MercaluzAmountCandidate:
 class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
     parser_name = "mercaluz"
     priority = 345
+    SUPPLIER_NAME = "COMPONENTES ELECTRICOS MERCALUZ, S.A."
     SUPPLIER_TAX_ID = "A03204864"
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
@@ -78,9 +79,8 @@ class MercaluzInvoiceParser(GenericSupplierInvoiceParser):
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         result = self.build_result(text, file_path)
-        folder_hint = self.get_folder_hint_name(file_path)
 
-        result.nombre_proveedor = folder_hint or "MERCALUZ"
+        result.nombre_proveedor = self.SUPPLIER_NAME
         result.nif_proveedor = self.SUPPLIER_TAX_ID
 
         result.numero_factura = self.extract_mercaluz_invoice_number(file_path, text)

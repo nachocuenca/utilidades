@@ -56,6 +56,7 @@ def test_scanner_marks_ticket_type_from_resolved_parser_and_skips_default_custom
     monkeypatch.setenv("FORCE_DEFAULT_CUSTOMER_FOR_FACTURAS", "true")
     monkeypatch.setenv("DEFAULT_CUSTOMER_NAME", "Daniel Cuenca Moya")
     monkeypatch.setenv("DEFAULT_CUSTOMER_TAX_ID", "48334490J")
+    monkeypatch.setenv("DEFAULT_CUSTOMER_POSTAL_CODE", "03501")
     get_settings.cache_clear()
 
     inbox_dir = tmp_path / "inbox"
@@ -97,12 +98,14 @@ def test_scanner_marks_ticket_type_from_resolved_parser_and_skips_default_custom
     assert stored[0].tipo_documento == "ticket"
     assert stored[0].nombre_cliente is None
     assert stored[0].nif_cliente is None
+    assert stored[0].cp_cliente is None
 
 
 def test_scanner_applies_default_customer_over_garbage_for_facturas(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("FORCE_DEFAULT_CUSTOMER_FOR_FACTURAS", "true")
     monkeypatch.setenv("DEFAULT_CUSTOMER_NAME", "Daniel Cuenca Moya")
     monkeypatch.setenv("DEFAULT_CUSTOMER_TAX_ID", "48334490J")
+    monkeypatch.setenv("DEFAULT_CUSTOMER_POSTAL_CODE", "03501")
     get_settings.cache_clear()
 
     inbox_dir = tmp_path / "inbox"
@@ -145,6 +148,7 @@ def test_scanner_applies_default_customer_over_garbage_for_facturas(monkeypatch,
     assert stored[0].tipo_documento == "factura"
     assert stored[0].nombre_cliente == "Daniel Cuenca Moya"
     assert stored[0].nif_cliente == "48334490J"
+    assert stored[0].cp_cliente == "03501"
 
 
 def test_scanner_process_file_returns_parser_trace_with_matched_parsers(monkeypatch, tmp_path: Path) -> None:
@@ -196,6 +200,7 @@ def test_scanner_keeps_customer_empty_when_root_scan_has_no_folder_origin(monkey
     monkeypatch.setenv("FORCE_DEFAULT_CUSTOMER_FOR_FACTURAS", "true")
     monkeypatch.setenv("DEFAULT_CUSTOMER_NAME", "Daniel Cuenca Moya")
     monkeypatch.setenv("DEFAULT_CUSTOMER_TAX_ID", "48334490J")
+    monkeypatch.setenv("DEFAULT_CUSTOMER_POSTAL_CODE", "03501")
     get_settings.cache_clear()
 
     inbox_dir = tmp_path / "repsol"
@@ -253,6 +258,110 @@ Registro Mercantil de Madrid, Tomo 2530 gral, Folio 1, Hoja M-44194, incr 665 C.
     assert stored[0].nif_proveedor == "A80298839"
     assert stored[0].nombre_cliente is None
     assert stored[0].nif_cliente is None
+    assert stored[0].cp_cliente is None
     assert stored[0].subtotal == 62.6
     assert stored[0].iva == 13.15
     assert stored[0].total == 75.75
+
+
+def test_scanner_extracts_minimal_fields_for_tgss_no_fiscal_receipt(monkeypatch, tmp_path: Path) -> None:
+    inbox_dir = tmp_path / "inbox"
+    supplier_dir = inbox_dir / "TGSS"
+    supplier_dir.mkdir(parents=True, exist_ok=True)
+
+    pdf_path = supplier_dir / "seguros_sociales_marzo.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake file for tests")
+
+    repository = InvoiceRepository(db_path=tmp_path / "app.db")
+    scanner = InvoiceScanner(repository=repository, inbox_dir=inbox_dir)
+
+    tgss_text = """
+    TESORERIA GENERAL DE LA SEGURIDAD SOCIAL
+    Recibo de liquidacion de cotizaciones
+    Razon social: AUTONOMOS PRUEBA SL
+    Fecha de valor: 28/03/2026
+    Importe del recibo: 523,17 EUR
+    Referencia: TGSS-03/2026-0001
+    Numero de recibo: 011234567890
+    """
+
+    def fake_read_pdf_text(path: str | Path) -> PdfReadResult:
+        resolved = Path(path).resolve()
+        return PdfReadResult(
+            file_path=resolved,
+            text=tgss_text,
+            page_count=1,
+            extractor="fake",
+        )
+
+    monkeypatch.setattr("src.services.scanner.read_pdf_text", fake_read_pdf_text)
+
+    summary = scanner.scan(recursive=True)
+
+    assert summary.procesados == 1
+    assert summary.requieren_revision == 1
+
+    stored = repository.list_invoices()
+    assert len(stored) == 1
+    assert stored[0].tipo_documento == "no_fiscal"
+    assert stored[0].parser_usado == "non_fiscal_receipt"
+    assert stored[0].nombre_proveedor == "Tesorería General de la Seguridad Social"
+    assert stored[0].nombre_cliente == "AUTONOMOS PRUEBA SL"
+    assert stored[0].numero_factura == "TGSS-03/2026-0001"
+    assert stored[0].fecha_factura == "28-03-2026"
+    assert stored[0].subtotal is None
+    assert stored[0].iva is None
+    assert stored[0].nif_proveedor is None
+    assert stored[0].total == 523.17
+
+
+def test_scanner_extracts_minimal_fields_for_bank_receipt_no_fiscal(monkeypatch, tmp_path: Path) -> None:
+    inbox_dir = tmp_path / "inbox"
+    supplier_dir = inbox_dir / "recibos banco"
+    supplier_dir.mkdir(parents=True, exist_ok=True)
+
+    pdf_path = supplier_dir / "agua_abril.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake file for tests")
+
+    repository = InvoiceRepository(db_path=tmp_path / "app.db")
+    scanner = InvoiceScanner(repository=repository, inbox_dir=inbox_dir)
+
+    bank_receipt_text = """
+    Adeudo por domiciliacion
+    Titular de la domiciliacion
+    AUTONOMO PRUEBA SL
+    Entidad emisora
+    SUMINISTROS AGUA MEDITERRANEO SL
+    Fecha de valor: 09/04/2026
+    Importe adeudado: 81,44 EUR
+    Observaciones: REC-2026/0045
+    Referencia del adeudo: SDD-998877
+    """
+
+    def fake_read_pdf_text(path: str | Path) -> PdfReadResult:
+        resolved = Path(path).resolve()
+        return PdfReadResult(
+            file_path=resolved,
+            text=bank_receipt_text,
+            page_count=1,
+            extractor="fake",
+        )
+
+    monkeypatch.setattr("src.services.scanner.read_pdf_text", fake_read_pdf_text)
+
+    summary = scanner.scan(recursive=True)
+
+    assert summary.procesados == 1
+    assert summary.requieren_revision == 1
+
+    stored = repository.list_invoices()
+    assert len(stored) == 1
+    assert stored[0].tipo_documento == "no_fiscal"
+    assert stored[0].parser_usado == "non_fiscal_receipt"
+    assert stored[0].nombre_cliente == "AUTONOMO PRUEBA SL"
+    assert stored[0].nombre_proveedor == "SUMINISTROS AGUA MEDITERRANEO SL"
+    assert stored[0].numero_factura == "REC-2026/0045"
+    assert stored[0].fecha_factura == "09-04-2026"
+    assert stored[0].subtotal is None
+    assert stored[0].iva is None
+    assert stored[0].total == 81.44

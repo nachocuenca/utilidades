@@ -43,6 +43,7 @@ TOTAL_LABEL_PATTERN = re.compile(r"total\s+factura|importe\s+total|\btotal\b", r
 class EdieuropaInvoiceParser(BaseInvoiceParser):
     parser_name = "edieuropa"
     priority = 350
+    SUPPLIER_NAME = "EDIEUROPA MURCIA PUCHADES INVESTMENT,SL"
     SUPPLIER_TAX_ID = "B03310091"
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
@@ -64,7 +65,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         result = self.build_result(text, file_path)
 
-        result.nombre_proveedor = "EDIEUROPA"
+        result.nombre_proveedor = self.SUPPLIER_NAME
         result.nif_proveedor = self.SUPPLIER_TAX_ID
         result.numero_factura = self.extract_edieuropa_invoice_number(text, file_path)
         result.fecha_factura = self.extract_edieuropa_invoice_date(text, file_path)

@@ -25,7 +25,7 @@ def test_mercaluz_std_layout(mercaluz_std_text):
     result = parser.parse(mercaluz_std_text, Path("mercaluz/factura_std.pdf"))
     
     assert result.parser_usado == "mercaluz"
-    assert result.nombre_proveedor == "mercaluz"
+    assert result.nombre_proveedor == "COMPONENTES ELECTRICOS MERCALUZ, S.A."
     assert result.nif_proveedor == "A03204864"
     assert result.numero_factura == "FVN2024-00123-456789" or result.numero_factura == "VN2024-00123-456789"
     assert result.fecha_factura == "15-10-2024"
@@ -39,7 +39,7 @@ def test_mercaluz_abv_layout(mercaluz_abv_text):
     result = parser.parse(mercaluz_abv_text, Path("mercaluz/ABV2024-00789-123456.pdf"))
     
     assert result.parser_usado == "mercaluz"
-    assert result.nombre_proveedor == "mercaluz"
+    assert result.nombre_proveedor == "COMPONENTES ELECTRICOS MERCALUZ, S.A."
     assert result.nif_proveedor == "A03204864"
     assert result.numero_factura == "ABV2024-00789-123456"
     assert result.fecha_factura == "16-10-2024"

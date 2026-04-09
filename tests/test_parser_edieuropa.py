@@ -35,7 +35,7 @@ def test_edieuropa_parse_completo(edieuropa_sample: str, parser: EdieuropaInvoic
     result = parser.parse(edieuropa_sample, "data/edieuropa/FAC-2024-0456.pdf")
 
     assert result.parser_usado == "edieuropa"
-    assert result.nombre_proveedor == "EDIEUROPA"
+    assert result.nombre_proveedor == "EDIEUROPA MURCIA PUCHADES INVESTMENT,SL"
     assert result.nif_proveedor == "B03310091"
     assert result.numero_factura == "2024-0456"  # FAC omitido por regex filename
     assert result.fecha_factura == "15-10-2024"  # Formato DD-MM-YYYY del texto
@@ -118,6 +118,7 @@ def test_edieuropa_extrae_tripleta_fiscal_real_sin_regresion(
 
     result = parser.parse(text, Path("data/edieuropa") / pdf_name)
 
+    assert result.nombre_proveedor == "EDIEUROPA MURCIA PUCHADES INVESTMENT,SL"
     assert result.numero_factura == invoice_number
     assert result.fecha_factura == invoice_date
     assert result.subtotal == pytest.approx(140.50)
