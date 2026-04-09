@@ -184,15 +184,13 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         return None
 
     def _should_allow_bare_year_from_text(self, value: str) -> bool:
-        if re.search(r"\bfac(?:tura)?\b", value, re.IGNORECASE):
-            return True
-
         cleaned = re.sub(r"\s+", " ", value).strip(" .,:;#/-[]()")
         return re.fullmatch(r"\d{4}\s*[-_ ]\s*\d{3,6}", cleaned) is not None
 
     def _is_plausible_invoice_number(self, value: str) -> bool:
         return (
             re.fullmatch(r"\d{4}-\d{3,6}", value) is not None
+            or re.fullmatch(r"\d{1,6}A\d{2}", value, re.IGNORECASE) is not None
             or re.fullmatch(r"\d{1,4}-A\d{2}-\d{1,6}", value, re.IGNORECASE) is not None
         )
 
@@ -580,17 +578,21 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         if fac_match:
             return f"{fac_match.group(1)}-{fac_match.group(2)}"
 
+        compact_match = re.search(
+            r"(?<![A-Z0-9])(\d{1,6})\s*(A\d{2})(?![A-Z0-9])",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if compact_match:
+            return f"{compact_match.group(1)}{compact_match.group(2).upper()}"
+
         structured_match = re.search(
             r"(?<![A-Z0-9])(\d{1,4})\s*[-_ ]\s*(A\d{2})\s*[-_ ]\s*(\d{1,6})(?![A-Z0-9])",
             cleaned,
             re.IGNORECASE,
         )
         if structured_match:
-            return (
-                f"{structured_match.group(1)}-"
-                f"{structured_match.group(2).upper()}-"
-                f"{structured_match.group(3)}"
-            )
+            return f"{structured_match.group(3)}{structured_match.group(2).upper()}"
 
         if allow_bare_year:
             bare_year_match = re.search(

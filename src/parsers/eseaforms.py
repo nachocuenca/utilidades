@@ -9,7 +9,7 @@ from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 class EseaformsInvoiceParser(GenericSupplierInvoiceParser):
     parser_name = "eseaforms"
     priority = 355
-    SUPPLIER_NAME = "CANAL TONIGHT, SOCIEDAD LIMITADA"
+    SUPPLIER_NAME = "Canal Tonight S.L."
     SUPPLIER_TAX_ID = "B76080407"
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:

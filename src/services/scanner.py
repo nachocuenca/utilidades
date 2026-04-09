@@ -381,6 +381,7 @@ class InvoiceScanner:
                 motivo_revision=review_reason,
                 carpeta_origen=folder_origin,
                 nombre_proveedor=parsed_non_fiscal.nombre_proveedor,
+                nif_proveedor=parsed_non_fiscal.nif_proveedor,
                 nombre_cliente=parsed_non_fiscal.nombre_cliente,
                 numero_factura=parsed_non_fiscal.numero_factura,
                 fecha_factura=parsed_non_fiscal.fecha_factura,

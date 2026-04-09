@@ -6,9 +6,9 @@ from src.parsers.edieuropa import EdieuropaInvoiceParser
 
 
 REAL_EDIEUROPA_CASES = [
-    ("edieuropa_real_1_a26_11.txt", "Factura 1-A26-11 DANIEL CUENCA MOYA.pdf", "1-A26-11", "01-01-2026"),
-    ("edieuropa_real_1_a26_27.txt", "Factura 1-A26-27 DANIEL CUENCA MOYA.pdf", "1-A26-27", "01-02-2026"),
-    ("edieuropa_real_1_a26_40.txt", "Factura 1-A26-40 DANIEL CUENCA MOYA.pdf", "1-A26-40", "01-03-2026"),
+    ("edieuropa_real_1_a26_11.txt", "Factura 1-A26-11 DANIEL CUENCA MOYA.pdf", "11A26", "01-01-2026"),
+    ("edieuropa_real_1_a26_27.txt", "Factura 1-A26-27 DANIEL CUENCA MOYA.pdf", "27A26", "01-02-2026"),
+    ("edieuropa_real_1_a26_40.txt", "Factura 1-A26-40 DANIEL CUENCA MOYA.pdf", "40A26", "01-03-2026"),
 ]
 
 
@@ -63,7 +63,7 @@ TOTAL FACTURA: 121.00 €
 
     result = parser.parse(text, "data/edieuropa/Factura_1-A26-11.pdf")
 
-    assert result.numero_factura == "1-A26-11"
+    assert result.numero_factura == "11A26"
     assert result.fecha_factura == "09-04-2026"
     assert result.subtotal == 100.0
     assert result.iva == 21.0
@@ -83,7 +83,7 @@ TOTAL FACTURA: 242.00 €
 
     result = parser.parse(text, "data/edieuropa/documento_sin_numero.pdf")
 
-    assert result.numero_factura == "1-A26-27"
+    assert result.numero_factura == "27A26"
 
 
 def test_edieuropa_rechaza_numero_basura_sin_estructura(parser: EdieuropaInvoiceParser) -> None:
@@ -136,7 +136,7 @@ Resumen final Base Imponible % IVA Cuota IVA Total Factura Transferencia bancari
 
     result = parser.parse(text, "data/edieuropa/Factura_1-A26-11.pdf")
 
-    assert result.numero_factura == "1-A26-11"
+    assert result.numero_factura == "11A26"
     assert result.fecha_factura == "01-01-2026"
     assert result.subtotal == pytest.approx(140.50)
     assert result.iva == pytest.approx(29.51)
@@ -152,7 +152,7 @@ Base Imponible 140,50 Cuota IVA 21 29,51 Total Factura 170,01 €
 
     result = parser.parse(text, "data/edieuropa/Factura_1-A26-27.pdf")
 
-    assert result.numero_factura == "1-A26-27"
+    assert result.numero_factura == "27A26"
     assert result.fecha_factura == "01-02-2026"
     assert result.subtotal == pytest.approx(140.50)
     assert result.iva == pytest.approx(29.51)
@@ -172,7 +172,7 @@ Transferencia bancaria 01/01/2026 29,51 21 140,50 170,01 €
 
     result = parser.parse(text, "data/edieuropa/Factura_1-A26-11.pdf")
 
-    assert result.numero_factura == "1-A26-11"
+    assert result.numero_factura == "11A26"
     assert result.subtotal is None
     assert result.iva is None
     assert result.total is None
@@ -191,7 +191,7 @@ Transferencia bancaria 01/02/2026 1,00 1 1,00 2,00 €
 
     result = parser.parse(text, "data/edieuropa/Factura_1-A26-27.pdf")
 
-    assert result.numero_factura == "1-A26-27"
+    assert result.numero_factura == "27A26"
     assert result.subtotal is None
     assert result.iva is None
     assert result.total is None

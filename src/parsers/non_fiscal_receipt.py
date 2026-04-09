@@ -27,6 +27,7 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
     LOOKAHEAD_LINES = 12
 
     FEMPA_SUPPLIER_NAME = "Federaci\u00f3n de Empresarios del Metal de la provincia de Alicante"
+    FEMPA_SUPPLIER_TAX_ID = "G03096963"
     TGSS_SUPPLIER_NAME = "Tesorer\u00eda General de la Seguridad Social"
     TGSS_COMPACT_SUPPLIER_MARKERS = (
         "tesoreria general de",
@@ -156,6 +157,7 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
 
         result.tipo_documento = "no_fiscal"
         result.nombre_proveedor = self.extract_supplier_name(lines, profile)
+        result.nif_proveedor = self.extract_supplier_tax_id(lines, profile)
         result.nombre_cliente = self.extract_customer_name(lines, profile, result.nombre_proveedor)
         result.total = self.extract_receipt_total(lines, profile)
         result.fecha_factura = self.extract_value_date(lines, profile)
@@ -217,6 +219,24 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
 
         fallback_candidates.sort(key=lambda item: (-item[0], -len(item[1]), item[1]))
         return fallback_candidates[0][1]
+
+    def extract_supplier_tax_id(self, lines: list[str], profile: str) -> str | None:
+        if profile != "fempa":
+            return None
+
+        for line in lines:
+            if self.FEMPA_SUPPLIER_TAX_ID in (candidate.upper() for candidate in self.extract_exact_tax_ids(line)):
+                return self.FEMPA_SUPPLIER_TAX_ID
+
+            issuer_match = re.search(
+                r"\bES\d{5}\s*([A-Z]\d{8}|\d{8}[A-Z]|[XYZ]\d{7}[A-Z])\b",
+                line,
+                re.IGNORECASE,
+            )
+            if issuer_match and issuer_match.group(1).upper() == self.FEMPA_SUPPLIER_TAX_ID:
+                return self.FEMPA_SUPPLIER_TAX_ID
+
+        return self.FEMPA_SUPPLIER_TAX_ID
 
     def extract_customer_name(
         self,

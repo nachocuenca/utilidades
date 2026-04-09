@@ -16,7 +16,7 @@ SALTOKI_SUMMARY_LINE_PATTERN = re.compile(
 SALTOKI_SUMMARY_NUMERIC_TOKEN_PATTERN = re.compile(SALTOKI_AMOUNT_PATTERN)
 
 HEADER_ROW_PATTERN = re.compile(
-    r"^\s*\d+\s+([0-9]{2}[-/][0-9]{2}[-/][0-9]{4})\s+(\d+)\s+\d+\s*$",
+    r"\b\d+\s+([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{4})\s+(\d{3,})\s+\d+\s*$",
     re.IGNORECASE,
 )
 
@@ -31,6 +31,7 @@ DATE_PATTERN = re.compile(
 )
 
 EURO_TOTAL_PATTERN = re.compile(rf"({SALTOKI_AMOUNT_PATTERN})\s*€", re.IGNORECASE)
+ABONO_PATTERN = re.compile(r"\bA\s*B\s*O\s*N\s*O\b", re.IGNORECASE)
 
 
 class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
@@ -83,6 +84,8 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
         result.fecha_factura = fecha_factura
 
         subtotal, iva, total = self.extract_totals(lines, text)
+        if self.is_credit_note(text, lines):
+            subtotal, iva, total = self.apply_credit_sign(subtotal, iva, total)
         result.subtotal = subtotal
         result.iva = iva
         result.total = total
@@ -195,6 +198,19 @@ class SaltokiInvoiceParser(GenericSupplierInvoiceParser):
             iva = round(total - base, 2)
 
         return base, iva, total
+
+    def is_credit_note(self, text: str, lines: list[str]) -> bool:
+        top_text = "\n".join(lines[:8]) if lines else text
+        return ABONO_PATTERN.search(top_text) is not None
+
+    def apply_credit_sign(
+        self,
+        subtotal: float | None,
+        iva: float | None,
+        total: float | None,
+    ) -> tuple[float | None, float | None, float | None]:
+        values = (subtotal, iva, total)
+        return tuple(-abs(value) if value is not None else None for value in values)
 
     def normalize_summary_candidate_line(self, raw_line: str) -> str:
         line = re.sub(r"\s+", " ", raw_line.strip()).strip()

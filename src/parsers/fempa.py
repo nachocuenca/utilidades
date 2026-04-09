@@ -21,7 +21,7 @@ class FempaInvoiceParser(GenericSupplierInvoiceParser):
     parser_name = "fempa"
     priority = 340
 
-    SUPPLIER_NAME = "FED. EMPRESARIOS DEL METAL"
+    SUPPLIER_NAME = "Federación de Empresarios del Metal de la provincia de Alicante"
     SUPPLIER_TAX_ID = "G03096963"
     SUPPLIER_MARKERS = (
         "fed. empresarios del metal",

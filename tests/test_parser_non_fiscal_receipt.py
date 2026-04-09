@@ -149,7 +149,7 @@ def test_non_fiscal_parser_extracts_fempa_real_fields() -> None:
     assert result.total == 48.76
     assert result.subtotal is None
     assert result.iva is None
-    assert result.nif_proveedor is None
+    assert result.nif_proveedor == "G03096963"
 
 
 def test_non_fiscal_parser_extracts_fempa_total_from_ocr_like_receipt() -> None:
@@ -162,6 +162,7 @@ def test_non_fiscal_parser_extracts_fempa_total_from_ocr_like_receipt() -> None:
 
     assert result.tipo_documento == "no_fiscal"
     assert result.nombre_proveedor == "Federaci\u00f3n de Empresarios del Metal de la provincia de Alicante"
+    assert result.nif_proveedor == "G03096963"
     assert result.nombre_cliente == "Daniel Cuenca Moya"
     assert result.numero_factura == "1S261409 1"
     assert result.fecha_factura == "12-01-2026"
