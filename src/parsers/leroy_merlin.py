@@ -85,6 +85,14 @@ TOTAL_LABEL_REGEX = re.compile(
 BLOCK_LOOKBACK = 7
 TAIL_SCAN_LINES = 40
 AMOUNT_TOLERANCE = 0.02
+SUPPLIER_CONTEXT_HINTS = (
+    "leroy merlin",
+    "cif",
+    "avda",
+    "avenida",
+    "telf",
+    "telefono",
+)
 
 
 class LeroyMerlinInvoiceParser(BaseInvoiceParser):
@@ -133,6 +141,7 @@ class LeroyMerlinInvoiceParser(BaseInvoiceParser):
         result.nif_proveedor = self.extract_supplier_tax_id(lines, text)
         result.numero_factura = self.extract_leroy_invoice_number(text, lines, file_path)
         result.fecha_factura = self.extract_leroy_date(text, lines, file_path)
+        result.cp_cliente = self.extract_leroy_customer_postal_code(lines)
 
         subtotal, iva, total = self.extract_leroy_amounts(text, lines)
         result.subtotal = subtotal
@@ -269,6 +278,9 @@ class LeroyMerlinInvoiceParser(BaseInvoiceParser):
         lines: list[str],
     ) -> tuple[float, float, float] | None:
         tail_lines = lines[-TAIL_SCAN_LINES:]
+        payment_triplet = self._extract_payment_summary_triplet(tail_lines)
+        if payment_triplet is not None:
+            return payment_triplet
 
         for end_index in range(len(tail_lines) - 1, -1, -1):
             window = tail_lines[max(0, end_index - BLOCK_LOOKBACK): end_index + 1]
@@ -282,6 +294,25 @@ class LeroyMerlinInvoiceParser(BaseInvoiceParser):
             triplet = self._extract_triplet_from_header_window(window)
             if triplet is not None:
                 return triplet
+
+        return None
+
+    def _extract_payment_summary_triplet(
+        self,
+        tail_lines: list[str],
+    ) -> tuple[float, float, float] | None:
+        for index, line in enumerate(tail_lines):
+            normalized_line = self._normalize_lookup_text(line)
+            if "modos de pago" not in normalized_line or "total" not in normalized_line:
+                continue
+
+            for candidate_line in tail_lines[index + 1 : index + 4]:
+                amounts = self.extract_amounts_from_fragment(candidate_line, ignore_percent=True)
+                triplet = self._pick_coherent_triplet(amounts)
+                if triplet is not None:
+                    return triplet
+
+            break
 
         return None
 
@@ -451,6 +482,54 @@ class LeroyMerlinInvoiceParser(BaseInvoiceParser):
                 customer_tax_ids.update(self.extract_exact_tax_ids(lines[next_index]))
 
         return customer_tax_ids
+
+    def extract_leroy_customer_postal_code(self, lines: list[str]) -> str | None:
+        customer_tax_index = self._find_customer_tax_index(lines)
+        if customer_tax_index is None:
+            return None
+
+        customer_block_start = self._find_interleaved_customer_block_start(lines, customer_tax_index)
+        if customer_block_start is None:
+            return None
+
+        customer_column_lines = [
+            lines[index]
+            for index in range(customer_block_start, customer_tax_index, 2)
+        ]
+        return self.extract_postal_code_from_text("\n".join(customer_column_lines))
+
+    def _find_customer_tax_index(self, lines: list[str]) -> int | None:
+        for index, line in enumerate(lines[:25]):
+            normalized_line = self._normalize_lookup_text(line)
+            if "numero nif" in normalized_line or "nif cliente" in normalized_line:
+                return index
+
+        return None
+
+    def _find_interleaved_customer_block_start(
+        self,
+        lines: list[str],
+        customer_tax_index: int,
+    ) -> int | None:
+        start_index = max(0, customer_tax_index - 12)
+
+        for index in range(start_index, customer_tax_index - 1):
+            current_line = lines[index]
+            next_line = lines[index + 1]
+            if self._looks_like_supplier_context_line(next_line) and not self._looks_like_supplier_context_line(current_line):
+                return index
+
+        return None
+
+    def _looks_like_supplier_context_line(self, line: str) -> bool:
+        normalized_line = self._normalize_lookup_text(line)
+        if normalized_line == "":
+            return False
+
+        if any(hint in normalized_line for hint in SUPPLIER_CONTEXT_HINTS):
+            return True
+
+        return self._contains_known_supplier_tax_id(line)
 
     def _extract_supplier_tax_id_candidates(self, fragment: str) -> list[str]:
         candidates: list[str] = []

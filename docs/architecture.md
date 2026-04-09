@@ -1,55 +1,36 @@
 # Arquitectura
 
-## Objetivo
+## Mapa real del proyecto
 
-Procesa PDFs → texto → parser → datos normalizados → SQLite → UI/export.
+El sistema actual es pequeno y bastante directo:
+- `config/settings.py`: lee `.env`, resuelve rutas y banderas de OCR / cliente por defecto.
+- `src/pdf/`: lectura con `pdfplumber` / `pypdf` y OCR con `pypdfium2` + `pytesseract`.
+- `src/parsers/`: registry + parsers especificos + genericos.
+- `src/services/scanner.py`: clasificacion `ticket` / `no_fiscal` / `factura`, resolucion de parser, cliente por defecto y persistencia.
+- `src/db/`: SQLite, upsert por hash y consultas para UI / export.
+- `src/services/exporter.py`: export CSV/XLSX.
+- `src/ui/`: tabla, detalle y reescaneo desde Streamlit.
 
-## Capas
+## Invariantes que ya existen
 
-### 1. Configuración
-`config/settings.py`: .env, rutas, OCR toggle, default_parser=\"generic\".
+- El scanner clasifica `no_fiscal` antes de pasar por el registry.
+- El registry decide por prioridad descendente; si hay empate, manda el orden de registro.
+- La persistencia usa `hash_archivo` como clave unica de upsert.
+- En el snapshot `2026-04-09` los tipos documentales persistidos son `factura`, `ticket` y `no_fiscal`.
+- `matched_parsers` es una traza de runtime, no una columna persistida.
+- El cliente por defecto vive en scanner, no en la base.
 
-### 2. Base de datos
-`src/db/*`: SQLite facturas (hash_archivo PK, upsert, filtros fecha/parser).
+## Lo importante para depurar
 
-### 3. Utils/PDF
-`src/utils/*`, `src/pdf/*`: Normaliza fechas/importes/nombres/NIF, lee/limpia texto.
+- Si falla la lectura: mirar `src/pdf/reader.py` y `src/pdf/ocr.py`.
+- Si falla la clasificacion `no_fiscal`: mirar `InvoiceScanner._looks_like_non_fiscal_document()`.
+- Si falla la resolucion de parser: mirar `src/parsers/registry.py`, `tests/test_parser_resolution.py` y `tests/test_parser_priorities.py`.
+- Si falla un proveedor: mirar su parser especifico y su test dedicado.
+- Si el dato se guardo mal: mirar `src/db/repositories.py` y el CSV mas reciente.
 
-### 4. Parsers **(actualizado hoy)**
-`src/parsers/*`:
+## Documentacion viva
 
-- Registry `registry.py`: Priority descendente (Obramat>Saltoki>Repsol>Edieuropa>Mercaluz>generic_ticket60>Maria/Agus>generic_supplier20>generic).
-- `resolve_with_trace()`: selected + matched_parsers para debug.
-- Base: Estructura salida, helpers.
-- Específicos: Alta prio por texto/path (ej. mercaluz NIF/A BV).
-- generic_ticket: Strict tickets (patterns + !largo/!OCR/!NIF muchos).
-- generic_supplier: Facturas genéricas (fiscal markers).
-- generic: Fallback.
-
-### 5. Servicios
-`src/services/scanner.py`: Lista PDFs, read_text, resolve_parser, infer tipo_doc (\"ticket\" si generic_ticket), upsert.
-Otros: export CSV/XLSX.
-
-### 6. UI
-`app.py` + `src/ui/*`: Tabla facturas, filtros, detalle texto_crudo/requiere_revision, reescaneo.
-
-## Flujo principal
-
-1. PDFs en `data/inbox/`.
-2. Scanner: read_pdf_text → registry.evaluate(text, path) → parse() → upsert.
-3. UI: Query repo → render/export.
-4. Scripts: `rescan.py` CLI.
-
-## Extensiones
-
-- Nuevo parser: Hereda Base, register(), test fixture.
-- Debug: `resolve_parser_with_trace()` logs matched.
-- Ver `docs/parsers.md` cambios/estado detallado.
-
-## Diseño
-
-- Local/SQLite.
-- Parsers desacoplados.
-- Texto_crudo para debug.
-- Tests por parser + fixtures reales.
-
+- Estado del sistema: `docs/estado_actual.md`
+- Registry y parsers: `docs/parsers.md`
+- Flujo de parsing: `docs/flujo_parsing.md`
+- Bitacora verificada: `CHANGELOG.md`

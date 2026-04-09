@@ -12,33 +12,38 @@ INVOICE_LABEL_PATTERN = re.compile(
     "(?:n[\\W_]*(?:\u00ba|\u00b0|o)?|no|num(?:ero)?|n\u00famero)?\\s*(?:de\\s*)?factura\\s*[:#\\-]?\\s*([^\\n\\r]+)",
     re.IGNORECASE,
 )
-TAIL_WINDOW_LINES = 30
 SUMMARY_SCAN_LINES = 40
 SUMMARY_MAX_SPAN = 6
-SUMMARY_LOOKAHEAD_LINES = 2
+SUMMARY_LOOKAHEAD_LINES = 1
+FINAL_BLOCK_LOOKAHEAD_LINES = 3
+STRICT_TAX_WINDOW_LINES = 4
 TEXT_SCAN_LINES = 18
 AMOUNT_TOLERANCE = 0.02
+RATE_TOLERANCE = 0.06
+FINAL_BLOCK_AMOUNT_TOKEN_PATTERN = r"[+-]?(?:\d{1,3}(?:[.]\d{3})+|\d+)(?:[.,]\d{2,4})"
+RATE_TOKEN_PATTERN = r"[+-]?(?:\d{1,2}(?:[.,]\d{1,2})?)"
+FINAL_BLOCK_ROW_WITH_RATE_PATTERN = re.compile(
+    rf"(?P<base>{FINAL_BLOCK_AMOUNT_TOKEN_PATTERN})\s+"
+    rf"(?P<rate>{RATE_TOKEN_PATTERN})\s+"
+    rf"(?P<iva>{FINAL_BLOCK_AMOUNT_TOKEN_PATTERN})\s+"
+    rf"(?P<total>{FINAL_BLOCK_AMOUNT_TOKEN_PATTERN})\s*(?:€|eur)?\s*$",
+    re.IGNORECASE,
+)
+FINAL_BLOCK_ROW_PATTERN = re.compile(
+    rf"(?P<base>{FINAL_BLOCK_AMOUNT_TOKEN_PATTERN})\s+"
+    rf"(?P<iva>{FINAL_BLOCK_AMOUNT_TOKEN_PATTERN})\s+"
+    rf"(?P<total>{FINAL_BLOCK_AMOUNT_TOKEN_PATTERN})\s*(?:€|eur)?\s*$",
+    re.IGNORECASE,
+)
+BASE_LABEL_PATTERN = re.compile(r"base\s+imponible|subtotal", re.IGNORECASE)
+IVA_LABEL_PATTERN = re.compile(r"cuota\s+iva|\biva\b", re.IGNORECASE)
+TOTAL_LABEL_PATTERN = re.compile(r"total\s+factura|importe\s+total|\btotal\b", re.IGNORECASE)
 
 
 class EdieuropaInvoiceParser(BaseInvoiceParser):
     parser_name = "edieuropa"
     priority = 350
     SUPPLIER_TAX_ID = "B03310091"
-
-    SUMMARY_PATTERNS = {
-        "base": [
-            r"base\s+imponible[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
-            r"subtotal(?:\s+art[^\d\n\r]*)?[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
-        ],
-        "iva": [
-            r"iva\s*\d*%?[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
-            r"cuota\s+iva[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
-        ],
-        "total": [
-            r"total\s+factura[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
-            r"total[:\s]*([+-]?(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:[.,]\d{2})?)",
-        ],
-    }
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         normalized_text = text.lower()
@@ -64,10 +69,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         result.numero_factura = self.extract_edieuropa_invoice_number(text, file_path)
         result.fecha_factura = self.extract_edieuropa_invoice_date(text, file_path)
 
-        subtotal, iva, total = self.extract_edieuropa_amounts(text)
-        result.subtotal = subtotal if subtotal is not None else self.extract_subtotal(text)
-        result.iva = iva if iva is not None else self.extract_iva(text)
-        result.total = total if total is not None else self.extract_total(text)
+        result.subtotal, result.iva, result.total = self.extract_edieuropa_amounts(text)
 
         return result.finalize()
 
@@ -79,35 +81,17 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         line_offset = max(0, len(lines) - SUMMARY_SCAN_LINES)
         tail_lines = lines[line_offset:]
 
-        final_block_triplet = self._extract_final_summary_triplet(tail_lines, line_offset)
+        final_block_triplet = self._extract_explicit_final_tax_block(tail_lines)
         if final_block_triplet is not None:
             return final_block_triplet
 
-        tail_text = "\n".join(lines[-TAIL_WINDOW_LINES:])
-        base_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS["base"])
-        iva_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS["iva"])
-        total_match = self._extract_amount(tail_text, self.SUMMARY_PATTERNS["total"])
+        strict_window_triplet = self._extract_strict_tax_window_triplet(tail_lines)
+        if strict_window_triplet is not None:
+            return strict_window_triplet
 
-        if base_match and iva_match and total_match:
-            base_val = self._parse_amount_match(base_match)
-            iva_val = self._parse_amount_match(iva_match)
-            total_val = self._parse_amount_match(total_match)
-            if (
-                base_val is not None
-                and iva_val is not None
-                and total_val is not None
-                and abs((base_val + iva_val) - total_val) <= AMOUNT_TOLERANCE
-            ):
-                return base_val, iva_val, total_val
-
-        summary_base, summary_iva, summary_total = self.extract_summary_amounts(text)
-        if (
-            summary_base is not None
-            and summary_iva is not None
-            and summary_total is not None
-            and abs((summary_base + summary_iva) - summary_total) <= AMOUNT_TOLERANCE
-        ):
-            return summary_base, summary_iva, summary_total
+        labeled_triplet = self._extract_labeled_summary_triplet(tail_lines, line_offset)
+        if labeled_triplet is not None:
+            return labeled_triplet
 
         return None, None, None
 
@@ -141,18 +125,6 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
                     return candidate
 
         return self.extract_date(text) or self.extract_filename_date(file_path)
-
-    def _extract_amount(self, text: str, patterns: list[str]) -> re.Match[str] | None:
-        for pattern in patterns:
-            matches = list(re.finditer(pattern, text, re.IGNORECASE))
-            if matches:
-                return matches[-1]
-        return None
-
-    def _parse_amount_match(self, match: re.Match[str] | None) -> float | None:
-        if not match:
-            return None
-        return parse_amount(match.group(1))
 
     def _extract_invoice_number_from_filename(self, file_path: str | Path) -> str | None:
         stem = Path(file_path).stem
@@ -223,12 +195,35 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
             or re.fullmatch(r"\d{1,4}-A\d{2}-\d{1,6}", value, re.IGNORECASE) is not None
         )
 
-    def _extract_final_summary_triplet(
+    def _extract_explicit_final_tax_block(self, lines: list[str]) -> tuple[float, float, float] | None:
+        for relative_index in range(len(lines) - 1, -1, -1):
+            header_line = lines[relative_index]
+            if not self._is_explicit_tax_header(header_line):
+                continue
+
+            requires_rate = "%" in header_line or re.search(r"\btipo\s+iva\b", header_line, re.IGNORECASE) is not None
+
+            for lookahead in range(1, FINAL_BLOCK_LOOKAHEAD_LINES + 1):
+                candidate_index = relative_index + lookahead
+                if candidate_index >= len(lines):
+                    break
+
+                candidate_line = lines[candidate_index]
+                if self._is_explicit_tax_header(candidate_line):
+                    break
+
+                triplet = self._parse_explicit_tax_row(candidate_line, requires_rate=requires_rate)
+                if triplet is not None:
+                    return triplet
+
+        return None
+
+    def _extract_labeled_summary_triplet(
         self,
         lines: list[str],
         line_offset: int,
     ) -> tuple[float, float, float] | None:
-        base_candidates = self._collect_amount_candidates(
+        base_candidates = self._collect_labeled_amount_candidates(
             lines,
             line_offset,
             [
@@ -237,7 +232,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
             ],
             ignore_percent=True,
         )
-        iva_candidates = self._collect_amount_candidates(
+        iva_candidates = self._collect_labeled_amount_candidates(
             lines,
             line_offset,
             [
@@ -246,7 +241,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
             ],
             ignore_percent=True,
         )
-        total_candidates = self._collect_amount_candidates(
+        total_candidates = self._collect_labeled_amount_candidates(
             lines,
             line_offset,
             [
@@ -260,27 +255,27 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         best_score: int | None = None
         best_triplet: tuple[float, float, float] | None = None
 
-        for total_label_index, total_value_index, total_value, total_rank in total_candidates:
-            for iva_label_index, iva_value_index, iva_value, iva_rank in iva_candidates:
-                if iva_label_index > total_label_index:
+        for total_line_index, total_value, total_rank in total_candidates:
+            for iva_line_index, iva_value, iva_rank in iva_candidates:
+                if iva_line_index > total_line_index:
                     continue
 
-                for base_label_index, base_value_index, base_value, base_rank in base_candidates:
-                    if base_label_index > iva_label_index:
+                for base_line_index, base_value, base_rank in base_candidates:
+                    if base_line_index > iva_line_index:
                         continue
 
-                    span = max(base_value_index, iva_value_index, total_value_index) - base_label_index
-                    if span > SUMMARY_MAX_SPAN + SUMMARY_LOOKAHEAD_LINES:
+                    span = total_line_index - base_line_index
+                    if span > SUMMARY_MAX_SPAN:
                         continue
 
-                    if abs((base_value + iva_value) - total_value) > AMOUNT_TOLERANCE:
+                    if not self._is_reliable_tax_triplet(base_value, iva_value, total_value):
                         continue
 
                     score = (
-                        total_rank * 1000000
-                        + iva_rank * 10000
+                        total_rank * 100000
+                        + iva_rank * 1000
                         + base_rank
-                        + total_value_index * 10
+                        + total_line_index
                         - span
                     )
                     if best_score is None or score > best_score:
@@ -289,15 +284,38 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
 
         return best_triplet
 
-    def _collect_amount_candidates(
+    def _extract_strict_tax_window_triplet(self, lines: list[str]) -> tuple[float, float, float] | None:
+        for end_index in range(len(lines) - 1, -1, -1):
+            for window_size in range(1, STRICT_TAX_WINDOW_LINES + 1):
+                start_index = end_index - window_size + 1
+                if start_index < 0:
+                    break
+
+                window_text = " ".join(lines[start_index:end_index + 1]).strip()
+                if not self._contains_required_tax_labels(window_text):
+                    continue
+
+                requires_rate = "%" in window_text or re.search(r"\btipo\s+iva\b", window_text, re.IGNORECASE) is not None
+
+                explicit_triplet = self._parse_explicit_tax_row(window_text, requires_rate=requires_rate)
+                if explicit_triplet is not None:
+                    return explicit_triplet
+
+                labeled_triplet = self._parse_labeled_tax_window(window_text)
+                if labeled_triplet is not None:
+                    return labeled_triplet
+
+        return None
+
+    def _collect_labeled_amount_candidates(
         self,
         lines: list[str],
         line_offset: int,
         label_rules: list[tuple[str, int]],
         *,
         ignore_percent: bool,
-    ) -> list[tuple[int, int, float, int]]:
-        candidates: list[tuple[int, int, float, int]] = []
+    ) -> list[tuple[int, float, int]]:
+        candidates: list[tuple[int, float, int]] = []
 
         for relative_index, line in enumerate(lines):
             label_match = self._match_summary_label(line, label_rules)
@@ -305,9 +323,11 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
                 continue
 
             label_end, rank = label_match
-            fragments: list[tuple[int, str, int]] = [
-                (relative_index, line[label_end:], 20),
-            ]
+            line_number = line_offset + relative_index
+            direct_amount = self._extract_single_reliable_amount(line[label_end:], ignore_percent=ignore_percent)
+            if direct_amount is not None:
+                candidates.append((line_number, direct_amount, rank + 20))
+                continue
 
             for lookahead in range(1, SUMMARY_LOOKAHEAD_LINES + 1):
                 candidate_index = relative_index + lookahead
@@ -318,30 +338,26 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
                 if self._has_summary_label(candidate_line):
                     break
 
-                if re.fullmatch(r"[-\s:._]+", candidate_line):
+                lookahead_amount = self._extract_single_reliable_amount(candidate_line, ignore_percent=ignore_percent)
+                if lookahead_amount is None:
                     continue
 
-                fragments.append((candidate_index, candidate_line, max(0, 20 - lookahead * 5)))
-
-            seen_local: set[tuple[int, float]] = set()
-            for value_index, fragment, source_bonus in fragments:
-                values = self.extract_amounts_from_fragment(fragment, ignore_percent=ignore_percent)
-                for value in values:
-                    amount = abs(value)
-                    dedupe_key = (value_index, amount)
-                    if dedupe_key in seen_local:
-                        continue
-                    seen_local.add(dedupe_key)
-                    candidates.append(
-                        (
-                            line_offset + relative_index,
-                            line_offset + value_index,
-                            amount,
-                            rank + source_bonus,
-                        )
+                candidates.append(
+                    (
+                        line_offset + candidate_index,
+                        lookahead_amount,
+                        rank + max(0, 20 - lookahead * 5),
                     )
+                )
+                break
 
         return candidates
+
+    def _extract_single_reliable_amount(self, fragment: str, *, ignore_percent: bool) -> float | None:
+        values = self.extract_amounts_from_fragment(fragment, ignore_percent=ignore_percent)
+        if len(values) != 1:
+            return None
+        return abs(values[0])
 
     def _match_summary_label(
         self,
@@ -360,6 +376,197 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
             line,
             re.IGNORECASE,
         ) is not None
+
+    def _contains_required_tax_labels(self, text: str) -> bool:
+        return (
+            BASE_LABEL_PATTERN.search(text) is not None
+            and IVA_LABEL_PATTERN.search(text) is not None
+            and TOTAL_LABEL_PATTERN.search(text) is not None
+        )
+
+    def _is_explicit_tax_header(self, line: str) -> bool:
+        lowered = line.lower()
+        has_base = "base imponible" in lowered or "subtotal" in lowered
+        has_iva = "cuota iva" in lowered or re.search(r"\biva\b", lowered) is not None
+        has_total = (
+            "total factura" in lowered
+            or "importe total" in lowered
+            or re.search(r"\btotal\b", lowered) is not None
+        )
+        return has_base and has_iva and has_total
+
+    def _parse_explicit_tax_row(
+        self,
+        line: str,
+        *,
+        requires_rate: bool,
+    ) -> tuple[float, float, float] | None:
+        patterns = [FINAL_BLOCK_ROW_WITH_RATE_PATTERN] if requires_rate else [
+            FINAL_BLOCK_ROW_WITH_RATE_PATTERN,
+            FINAL_BLOCK_ROW_PATTERN,
+        ]
+
+        for pattern in patterns:
+            match = pattern.search(line)
+            if match is None:
+                continue
+
+            base_value = parse_amount(match.group("base"))
+            iva_value = parse_amount(match.group("iva"))
+            total_value = parse_amount(match.group("total"))
+            rate_text = match.groupdict().get("rate")
+            rate_value = parse_amount(rate_text) if rate_text is not None else None
+
+            if not self._is_reliable_tax_triplet(base_value, iva_value, total_value, rate=rate_value):
+                return None
+
+            return abs(base_value), abs(iva_value), abs(total_value)
+
+        return None
+
+    def _parse_labeled_tax_window(self, text: str) -> tuple[float, float, float] | None:
+        compact_window = re.sub(r"\s+", " ", text).strip()
+        if compact_window == "":
+            return None
+
+        total_matches = list(TOTAL_LABEL_PATTERN.finditer(compact_window))
+        iva_matches = list(IVA_LABEL_PATTERN.finditer(compact_window))
+        base_matches = list(BASE_LABEL_PATTERN.finditer(compact_window))
+
+        for total_match in reversed(total_matches):
+            for iva_match in reversed(iva_matches):
+                if iva_match.start() >= total_match.start():
+                    continue
+
+                for base_match in reversed(base_matches):
+                    if base_match.start() >= iva_match.start():
+                        continue
+
+                    triplet = self._parse_labeled_tax_segments(
+                        compact_window[base_match.end():iva_match.start()],
+                        compact_window[iva_match.end():total_match.start()],
+                        compact_window[total_match.end():],
+                    )
+                    if triplet is not None:
+                        return triplet
+
+        return None
+
+    def _parse_labeled_tax_segments(
+        self,
+        base_segment: str,
+        iva_segment: str,
+        total_segment: str,
+    ) -> tuple[float, float, float] | None:
+        base_value = self._extract_single_reliable_amount(base_segment, ignore_percent=True)
+        total_value = self._extract_single_reliable_amount(total_segment, ignore_percent=False)
+        if base_value is None or total_value is None:
+            return None
+
+        iva_resolution = self._resolve_iva_amount_from_segment(
+            iva_segment,
+            subtotal=base_value,
+            total=total_value,
+        )
+        if iva_resolution is None:
+            return None
+
+        iva_value, _ = iva_resolution
+        return base_value, iva_value, total_value
+
+    def _resolve_iva_amount_from_segment(
+        self,
+        segment: str,
+        *,
+        subtotal: float,
+        total: float,
+    ) -> tuple[float, float | None] | None:
+        values = [abs(value) for value in self.extract_amounts_from_fragment(segment, ignore_percent=False)]
+        if not values or len(values) > 2:
+            return None
+
+        candidate_options: list[tuple[float, float | None, int]] = []
+        if len(values) == 1:
+            candidate_options.append((values[0], None, 10))
+        else:
+            first_value, second_value = values
+            if self._looks_like_tax_rate(first_value):
+                candidate_options.append((second_value, first_value, 40))
+            if self._looks_like_tax_rate(second_value):
+                candidate_options.append((first_value, second_value, 30))
+            candidate_options.append((second_value, None, 20))
+            candidate_options.append((first_value, None, 10))
+
+        best_candidate: tuple[float, float | None] | None = None
+        best_score: int | None = None
+
+        for iva_value, rate_value, score in candidate_options:
+            if not self._is_reliable_tax_triplet(subtotal, iva_value, total, rate=rate_value):
+                continue
+
+            if best_score is None or score > best_score:
+                best_candidate = (iva_value, rate_value)
+                best_score = score
+                continue
+
+            if score == best_score and best_candidate != (iva_value, rate_value):
+                return None
+
+        return best_candidate
+
+    def _looks_like_tax_rate(self, value: float) -> bool:
+        rate_value = abs(value)
+        if rate_value > 30 + RATE_TOLERANCE:
+            return False
+
+        return abs((rate_value * 10) - round(rate_value * 10)) <= RATE_TOLERANCE
+
+    def _is_reliable_tax_triplet(
+        self,
+        subtotal: float | None,
+        iva: float | None,
+        total: float | None,
+        *,
+        rate: float | None = None,
+    ) -> bool:
+        if subtotal is None or iva is None or total is None:
+            return False
+
+        subtotal_value = abs(subtotal)
+        iva_value = abs(iva)
+        total_value = abs(total)
+
+        if abs((subtotal_value + iva_value) - total_value) > AMOUNT_TOLERANCE:
+            return False
+
+        if self._is_trivial_tax_triplet(subtotal_value, iva_value, total_value):
+            return False
+
+        if total_value + AMOUNT_TOLERANCE < max(subtotal_value, iva_value):
+            return False
+
+        if subtotal_value > 0 and iva_value >= subtotal_value - AMOUNT_TOLERANCE:
+            return False
+
+        if rate is None:
+            return True
+
+        rate_value = abs(rate)
+        if rate_value > 100:
+            return False
+
+        if rate_value == 0:
+            return iva_value <= RATE_TOLERANCE
+
+        expected_iva = subtotal_value * rate_value / 100.0
+        return abs(expected_iva - iva_value) <= RATE_TOLERANCE
+
+    def _is_trivial_tax_triplet(self, subtotal: float, iva: float, total: float) -> bool:
+        if max(subtotal, iva, total) > 2.0:
+            return False
+
+        rounded_values = [abs(value - round(value)) <= AMOUNT_TOLERANCE for value in (subtotal, iva, total)]
+        return all(rounded_values)
 
     def _match_invoice_number(self, value: str, *, allow_bare_year: bool) -> str | None:
         cleaned = re.sub(r"\s+", " ", value).strip()

@@ -1,84 +1,108 @@
 # Parsers
 
-## Visión general
+## Registro real
 
-La aplicación usa parsers especializados por emisor + genéricos. El registry (`src/parsers/registry.py`) resuelve por priority descendente hasta primer match en `can_handle(text)`.
+Orden efectivo del registry a fecha `2026-04-09`.
 
-**Orden actual (por priority descendente):**
-1. obramat, saltoki, repsol, eseaforms, edieuropa, mercaluz (alta, específicos)
-2. generic_ticket (prio=60, tickets strict)
-3. maria, agus (específicos bajos)
-4. generic_supplier (prio=20, facturas genéricas)
-5. generic (fallback final)
+Notas:
+- El registry ordena solo por `priority` descendente.
+- Cuando dos parsers comparten prioridad, decide el orden de registro actual en `ParserRegistry._register_defaults()`.
+- `matched_parsers` existe en runtime, pero no se persiste en SQLite ni en CSV.
 
-Resolución incluye trace `matched_parsers` para debug. Path `/tickets/` fuerza generic_ticket.
+| Priority | Parser | Base | Papel real |
+| --- | --- | --- | --- |
+| 520 | `leroy_merlin` | `BaseInvoiceParser` | Parser especifico Leroy Merlin |
+| 500 | `obramat` | `GenericSupplierInvoiceParser` | Parser especifico Obramat / Bricoman |
+| 490 | `saltoki` | `GenericSupplierInvoiceParser` | Parser especifico Saltoki |
+| 420 | `legal_quality` | `GenericSupplierInvoiceParser` | Parser especifico Legal Quality |
+| 360 | `repsol` | `GenericSupplierInvoiceParser` | Parser especifico Repsol factura |
+| 360 | `versotel` | `GenericSupplierInvoiceParser` | Parser especifico Versotel / Zennio |
+| 355 | `eseaforms` | `GenericSupplierInvoiceParser` | Parser especifico Eseaforms |
+| 350 | `edieuropa` | `BaseInvoiceParser` | Parser especifico Edieuropa |
+| 345 | `mercaluz` | `GenericSupplierInvoiceParser` | Parser especifico Mercaluz |
+| 340 | `davofrio` | `BaseInvoiceParser` | Parser especifico Davofrio |
+| 340 | `fempa` | `GenericSupplierInvoiceParser` | Parser especifico Fempa |
+| 340 | `wurth` | `BaseInvoiceParser` | Parser especifico Wurth |
+| 330 | `levantia` | `GenericSupplierInvoiceParser` | Parser especifico Levantia |
+| 100 | `maria` | `BaseInvoiceParser` | Parser especifico Maria / Energy in Motion |
+| 80 | `agus` | `BaseInvoiceParser` | Parser especifico Agus / Clinica Almendros |
+| 60 | `generic_ticket` | `BaseInvoiceParser` | Fallback estricto para tickets |
+| 20 | `generic_supplier` | `BaseInvoiceParser` | Fallback de factura fiscal |
+| 10 | `generic` | `BaseInvoiceParser` | Fallback final |
 
-## Cambios hechos hoy (2026-04-08)
+Desempates relevantes en este snapshot:
+- `repsol` se evalua antes que `versotel`.
+- `davofrio` se evalua antes que `fempa`.
+- `fempa` se evalua antes que `wurth`.
 
-Archivos tocados (git status + commits recientes):
-- `src/parsers/registry.py`: Priorities explícitas, orden fijo, `evaluate()` con trace.
-- `src/parsers/generic_ticket.py`: Endurecido `can_handle` (rechazo >60 líneas, >3 NIF, OCR basura top10, requiere ≥2 strong patterns O 1strong+support+total+fecha). Mejoras: proveedor top10 no fiscal/cliente, NIF cerca proveedor, fecha/total priorizadas.
-- `src/parsers/generic_supplier.py`: Nueva para facturas estructura fiscal (base/cuota/total), evita tickets, path aliases (mercaluz→\"Componentes Eléctricos Mercaluz S.A\", etc.).
-- `src/parsers/mercaluz.py`, `repsol.py`, `edieuropa.py`: Ajustes específicos + nuevos tests/fixtures.
-- Tests: `test_parser_priorities.py` (generic_ticket no intercepta maria/agus/obramat/repsol), `test_parser_resolution.py` (path/evidence rules), nuevos `test_parser_mercaluz/edieuropa/repsol.py` + fixtures sample_texts.
+## Relacion entre especificos y genericos
 
-**Impacto funcional:**
-- Mejor distinción ticket/factura: menos falsos tickets en facturas largas/fiscales.
-- Extracción robusta tickets: rechaza OCR basura, prioriza signals reales.
-- Genéricos separados: supplier para facturas, ticket strict.
-- Visibles operativa: scanner infer `tipo_documento=\"ticket\"` desde generic_ticket, trace en logs debug.
+Reglas de diseno activas en el codigo actual:
+- El flujo correcto es parser especifico por proveedor cuando existe evidencia suficiente.
+- `generic_ticket` y `generic_supplier` estan separados para no mezclar tickets con facturas fiscales.
+- `generic` solo queda como red de seguridad.
+- Algunos parsers especificos heredan de `GenericSupplierInvoiceParser`, pero conservan `can_handle()` y extraccion propios.
+- `Agus` es el unico parser especifico que en este snapshot puede caer internamente a `generic` cuando no detecta su layout principal.
 
-## Estado por parser
+Relacion operativa:
+- `generic_ticket`: tickets reales, cortos, con senales fuertes o ruta `/tickets/`.
+- `generic_supplier`: facturas con estructura fiscal, proveedor razonable y evidencia suficiente de importes.
+- `generic`: heuristica amplia sin garantia de proveedor.
 
-| Parser | Estado | Cubre bien | Corregido hoy | Pendiente |
-|--------|--------|------------|---------------|-----------|
-| obramat | OK | Facturas bricolaje | N/A | N/A |
-| saltoki | OK | Resúmenes/facturas | N/A | Más formatos |
-| repsol | Estable | Estándar/resúmenes/partial | Test fixtures nuevos | Tickets edge |
-| eseaforms | OK | Formularios | N/A | N/A |
-| edieuropa | Estable | Estándar | Nuevo test/fixture | N/A |
-| mercaluz | Estable | ABV/std/resúmenes (ascii) | Nuevo test/fixtures | NIF ABV robusto |
-| generic_ticket | Estable | Tickets strict (simplificadas/op) | Endurecido can_handle/extracciones | Más OCR edge |
-| maria | OK | Energyinmotion | N/A | N/A |
-| agus | OK | Clínica/fisio | N/A | N/A |
-| generic_supplier | Nuevo | Facturas genéricas no-ticket | Separada, aliases path | Nombres ambiguos |
-| generic | Fallback | Todo resto | N/A | N/A |
+## Criterios reales de resolucion compartidos
 
-No eliminados/fusionados hoy.
+Heuristicas compartidas en `src/parsers/base.py`:
+- `looks_like_ticket_document()` acepta ruta `/tickets/` o texto corto con senales fuertes de ticket, total y fecha.
+- `looks_like_invoice_document()` exige al menos 2 marcadores fiscales entre `factura`, `base imponible`, `cuota iva`, `importe iva`, `total factura` y similares.
 
-## Criterios de extracción
+Heuristicas compartidas en `generic_supplier`:
+- Rechaza documentos que parezcan ticket.
+- Solo entra si el documento parece factura y ademas hay combinacion de proveedor, NIF, numero, fecha o importes fiables.
+- Tiene aliases de carpeta para rescatar proveedor solo cuando hay senal real de bloque de proveedor. Aliases activos: `levantia`, `davofrio`, `leroy merlin`, `repsol`, `obramat`, `saltoki benidorm`, `saltoki alicante`, `mercaluz`.
 
-- **Proveedor:** Línea top (no fiscal/cliente/OCR), path alias/hint fallback.
-- **Cliente:** Cerca labels cliente/titular (no forzado en tickets).
-- **Número factura:** OP/identificador en tickets, std en facturas.
-- **Fecha fiscal:** Cerca \"fecha\", prior top tickets.
-- **Importes:** Prior bottom líneas total, labels base/cuota/IVA. Rechazo basura OCR.
-- **Ticket vs Factura:** Priority + can_handle strict (longitud/NIF/patterns). Path /tickets/ fuerza ticket.
-- **Tipo IVA vs Cuota:** Labels cuota/base → IVA calculado si base+IVA=total.
-- **Rechazo OCR:** Líneas upper cortas/no vowels, patterns noisy (ajoh/OILOF).
+Heuristicas compartidas en `generic_ticket`:
+- Rechaza documentos de mas de 60 lineas.
+- Requiere 2 patrones fuertes de ticket, o 1 fuerte + 1 de soporte + total + fecha.
+- Rechaza textos con demasiados NIF o demasiado OCR basura.
+- Puede forzarse por ruta `/tickets/` o `/ticket/`.
 
-## Tests y validación
+## Estado parser por parser
 
-**Tests tocados/añadidos:**
-- `test_parser_priorities.py`: No-intercept (maria/agus/obramat win).
-- `test_parser_resolution.py`: Evidence requerida, path no fuerza específico.
-- `test_parser_generic.py`: Incluye generic_ticket stricter.
-- Nuevos: `test_parser_mercaluz.py`, `test_parser_edieuropa.py`, `test_parser_repsol.py`.
+| Parser | `can_handle()` real | Que controla al parsear | Evidencia actual | Riesgo conocido |
+| --- | --- | --- | --- | --- |
+| `leroy_merlin` | Exige `leroy merlin` + bloque fiscal + soporte de NIF/proveedor y numero/fecha/importes | Proveedor, NIF, numero, fecha y bloque fiscal final coherente | 2 filas en CSV, proveedor y cabecera correctos | Pendiente real: faltan `subtotal`, `iva`, `total` en las 2 filas vivas |
+| `obramat` | Score por marca/path/Finestrat/desglose; rechaza Leroy | Proveedor y cliente Dani, numero, fecha y varios layouts de desglose | 29 filas vivas + test dedicado | Muy dependiente de layouts conocidos `clasico`, `rectificativa` y `F0018` |
+| `saltoki` | Marca/path/CIF de sucursal | Sucursal, proveedor, Dani, numero/fecha por cabecera o filename, totales de resumen | 15 filas vivas + varios tests | Si la sucursal no se detecta, degrada nombre/NIF de proveedor |
+| `legal_quality` | Marca/dominio/CIF y pinta de factura | Proveedor fijo, numero, fecha y candidatos coherentes base/iva/total | 1 fila viva + tests | Poco volumen real |
+| `repsol` | Excluye simplificadas; usa marca, compania real y marcadores de factura energetica | Facturadora real, NIF proveedor correcto, numero, fecha y bloque fiscal final | 3 filas vivas + tests directos + scanner | Las simplificadas siguen yendo a `generic_ticket` por diseno |
+| `versotel` | Marca/CIF/Zennio + exige resumen coherente, numero y fecha | Emisor fiscal Versotel, numero, fecha y resumen final | 1 fila viva + tests | Poco volumen real |
+| `eseaforms` | Marca/path/CIF | Proveedor fijo, numero por filename `I...`, fecha y totales etiquetados | 3 filas vivas | Parser simple, sin mucha tolerancia a layouts nuevos |
+| `edieuropa` | Marca/path/CIF y contexto de electrodomesticos | Numero robusto desde filename/texto, fecha y bloque fiscal coherente | 3 filas vivas + tests dedicados | Vigilar OCR que rompa el numero de factura |
+| `mercaluz` | Marca/path/ABV/CIF con score | Tipo de documento ABV/FVN/VN, signo de importes, numero, fecha y bloque final coherente | 12 filas vivas + tests dedicados | Parser complejo; seguir vigilando layouts nuevos aunque el dataset vivo actual esta bien |
+| `davofrio` | Marca o path + patron `FVC..-....` | NIF proveedor tolerante a OCR invertido, numero, fecha y resumen | 1 fila viva + tests | Poco volumen real |
+| `fempa` | Requiere factura exenta FEMPA y rechaza recibo bancario | Proveedor fijo, cliente, numero, fecha, subtotal/total e IVA 0 | 1 fila viva + tests | Muy ligado a marcadores de exencion |
+| `wurth` | Marca/path/CIF + cabecera y resumen propios | Proveedor, numero, fecha y fila de resumen con portes/neto/IVA/total | 1 fila viva | Poco volumen real |
+| `levantia` | Marca/path/CIF + bloques cliente/proveedor y resumen | Proveedor, NIF evitando IDs del cliente, numero, fecha y triplete coherente | 2 filas vivas + tests | Poco volumen real |
+| `maria` | Clues muy especificos de Maria / Energy in Motion | Proveedor fijo, bloque de cliente, CP y totales | Tests dedicados | No aparece como parser final en el ultimo CSV |
+| `agus` | Clues de Clinica Almendros / Agus | Layout Clinica Almendros; si no, cae a `generic` y cambia `parser_usado` | Tests dedicados | No aparece en el ultimo CSV y parte del parse depende del fallback |
+| `generic_ticket` | Ticket corto con senales fuertes o ruta `/tickets/` | Proveedor top10, NIF proveedor cercano, numero, fecha, total y opcional base/IVA | Tests de resolucion y scanner | No aparece como parser final en el ultimo CSV |
+| `generic_supplier` | Factura fiscal, no ticket, con proveedor o importes fiables | Proveedor/NIF, numero, fecha, triplete fiscal o total etiquetado | Tests de resolucion y genericos | No aparece como parser final en el ultimo CSV |
+| `generic` | Siempre `True` | Extraccion basica de nombre, IDs, fecha e importes | Fallback de seguridad | No debe tapar proveedores conocidos |
 
-**Comandos validación mínima:**
-```
-pytest tests/test_parser_priorities.py tests/test_parser_resolution.py
-```
+## Cobertura y evidencia real
 
-**Completa:**
-```
-pytest tests/test_parser_*.py -v
-```
+Cobertura dedicada presente en `tests/`:
+- `obramat`, `saltoki`, `repsol`, `mercaluz`, `edieuropa`, `davofrio`, `fempa`, `legal_quality`, `levantia`, `versotel`, `maria`, `agus`
+- `generic_ticket`, `generic_supplier`, prioridades y resolucion
+- `scanner` para `ticket`, `no_fiscal`, trace y cliente por defecto
 
-## Pendiente real
+Ausencias relevantes:
+- No existe un test dedicado de `leroy_merlin` en este repo.
+- El ultimo CSV vivo no ejerce `ticket`, `generic_ticket`, `generic_supplier`, `generic`, `maria` ni `agus` como parser final.
 
-- Robustez OCR en generic_ticket (más patterns basura).
-- Parsers pendientes: Minimax (menciones commits).
-- Deuda: Edge nombres ambiguos en generic_supplier.
-- Warnings operativa: Tests pasados, pero validar fixtures reales en scanner.
+## Riesgos y advertencias operativas
 
+- El registry no persiste `matched_parsers`; si la duda es de resolucion, hay que reproducir con tests o instrumentar scanner.
+- Los hints de ruta y `carpeta_origen` importan. Renombrar o aplanar carpetas puede cambiar el parser ganador o el cliente por defecto.
+- En Mercaluz, los abonos ABV terminan persistidos como `tipo_documento=factura` con importes negativos. Hoy no existe un tipo persistido `abono`.
+- En el snapshot actual el unico parser con fallo visible en CSV es `leroy_merlin`.
