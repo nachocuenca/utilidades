@@ -115,8 +115,8 @@ def test_generic_base_rechaza_proveedor_ocr_basura() -> None:
     parser = GenericSupplierInvoiceParser()
     text = """
 otnemucod
-ajoh 
-OILOF 
+ajoh
+OILOF
 .F.I.N
 Cliente: Cliente Prueba SL
     """
@@ -138,6 +138,23 @@ NIF cliente 48334490J
     assert result.nif_proveedor == "B12345678"
 
 
+def test_generic_base_nif_cliente_rechaza_basura_ocr() -> None:
+    text = """
+PROVEEDOR XYZ SL
+NIF B12345678
+Cliente: LCUENCAMOYA
+NIF cliente: LCUENCAMOYAEI
+Fecha factura: 11/03/2026
+Base imponible 100,00
+IVA 21,00
+Total factura 121,00
+    """
+    parser = GenericInvoiceParser()
+    result = parser.parse(text, Path("cliente_ocr_basura.pdf"))
+    assert result.nombre_cliente == "LCUENCAMOYA"
+    assert result.nif_cliente is None
+
+
 def test_generic_base_numero_factura_filtra_ocr() -> None:
     """Numero_factura rechaza basura OCR."""
     assert GenericInvoiceParser().clean_invoice_number_candidate("direcci") is None
@@ -150,7 +167,7 @@ def test_generic_base_iva_cuota_no_porcentaje() -> None:
     """IVA extrae cuota real, no tipo %."""
     text = """
 Base imponible 100,00
-IVA (21%) 21,00 
+IVA (21%) 21,00
 Total factura 121,00
     """
     parser = GenericInvoiceParser()
@@ -178,11 +195,14 @@ TOTAL FACTURA...... 142.78
     assert result.total == 142.78
 
 
-def test_generic_supplier_uses_folder_alias_for_levantia_when_ocr_name_is_noisy() -> None:
+def test_generic_supplier_uses_folder_alias_when_supplier_block_exists_but_name_is_noisy() -> None:
     text = """
-    77410930B
+    Proveedor:
     OILOF
+    CIF proveedor: B03901477
     Fecha factura: 20/03/2026
+    Base imponible: 1303,00
+    Cuota IVA: 273,63
     Total factura: 1576,63
     Cliente: Daniel Cuenca Moya
     NIF cliente: 48334490J
@@ -192,10 +212,13 @@ def test_generic_supplier_uses_folder_alias_for_levantia_when_ocr_name_is_noisy(
     result = parser.parse(text, Path(r"C:\tmp\1T 26\LEVANTIA\0100604203149.pdf"))
 
     assert result.nombre_proveedor == "Aislamientos Acústicos Levante, S.L."
+    assert result.nif_proveedor == "B03901477"
+    assert result.subtotal == 1303.0
+    assert result.iva == 273.63
     assert result.total == 1576.63
 
 
-def test_generic_supplier_uses_folder_alias_for_davofrio_when_top_name_is_garbage() -> None:
+def test_generic_supplier_does_not_use_folder_alias_without_supplier_signal() -> None:
     text = """
     ajoH
     Fecha factura: 26/03/2026
@@ -207,12 +230,49 @@ def test_generic_supplier_uses_folder_alias_for_davofrio_when_top_name_is_garbag
     """
     parser = GenericSupplierInvoiceParser()
 
+    assert parser.can_handle(text, Path(r"C:\tmp\1T 26\DAVOFRIO\FVC26-0381.pdf"))
+
     result = parser.parse(text, Path(r"C:\tmp\1T 26\DAVOFRIO\FVC26-0381.pdf"))
 
-    assert result.nombre_proveedor == "DAVOFRIO, S.L.U."
+    assert result.nombre_proveedor is None
+    assert result.nif_proveedor is None
     assert result.subtotal == 219.0
     assert result.iva == 45.99
     assert result.total == 264.99
+
+
+def test_generic_supplier_rejects_weak_total_only_document_even_with_folder_hint() -> None:
+    text = """
+    OILOF
+    Fecha factura: 20/03/2026
+    Total factura: 1576,63
+    Cliente: Daniel Cuenca Moya
+    NIF cliente: 48334490J
+    """
+
+    parser = GenericSupplierInvoiceParser()
+
+    assert not parser.can_handle(text, Path(r"C:\tmp\1T 26\LEVANTIA\0100604203149.pdf"))
+
+
+def test_generic_supplier_does_not_guess_lonely_top_tax_id_as_supplier() -> None:
+    text = """
+    77410930B
+    OILOF
+    Fecha factura: 20/03/2026
+    Base imponible: 1303,00
+    Cuota IVA: 273,63
+    Total factura: 1576,63
+    Cliente: Daniel Cuenca Moya
+    NIF cliente: 48334490J
+    """
+
+    parser = GenericSupplierInvoiceParser()
+    result = parser.parse(text, Path(r"C:\tmp\1T 26\LEVANTIA\0100604203149.pdf"))
+
+    assert result.nombre_proveedor is None
+    assert result.nif_proveedor is None
+    assert result.total == 1576.63
 
 
 def test_generic_supplier_marks_credit_note_amounts_as_negative() -> None:
@@ -234,7 +294,6 @@ def test_generic_supplier_marks_credit_note_amounts_as_negative() -> None:
     assert result.total == -6.64
 
 
-# NUEVOS TESTS PARA GENERIC_TICKET MEJORADO
 def test_generic_ticket_rechaza_proveedor_ocr_basura_ticket() -> None:
     """OCR basura en ticket rechazado."""
     parser = GenericTicketInvoiceParser()
@@ -249,7 +308,7 @@ EFECTIVO 60
     """
     result = parser.parse(text, Path("ticket_ocr_basura.pdf"))
     assert result.nombre_proveedor is None
-    assert result.status == "failed"
+    assert result.total == 54.2
 
 
 def test_generic_ticket_nif_proveedor_no_coge_cliente() -> None:
@@ -267,7 +326,7 @@ NIF cliente 48334490J
     parser = GenericTicketInvoiceParser()
     result = parser.parse(text, Path("ticket_nif.pdf"))
     assert result.nif_proveedor == "B87654321"
-    assert "48334490J" not in str(result)
+    assert result.nif_cliente is None
 
 
 def test_generic_ticket_can_handle_rechaza_doc_largo_fiscal() -> None:
