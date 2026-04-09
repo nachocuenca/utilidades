@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.parsers.base import BaseInvoiceParser, ParsedInvoiceData
 from src.utils.amounts import parse_amount
+from src.utils.dates import normalize_date
 
 
 INVOICE_LABEL_PATTERN = re.compile(
@@ -14,6 +15,7 @@ INVOICE_LABEL_PATTERN = re.compile(
 TAIL_WINDOW_LINES = 30
 SUMMARY_SCAN_LINES = 40
 SUMMARY_MAX_SPAN = 6
+SUMMARY_LOOKAHEAD_LINES = 2
 TEXT_SCAN_LINES = 18
 AMOUNT_TOLERANCE = 0.02
 
@@ -60,7 +62,7 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         result.nombre_proveedor = "EDIEUROPA"
         result.nif_proveedor = self.SUPPLIER_TAX_ID
         result.numero_factura = self.extract_edieuropa_invoice_number(text, file_path)
-        result.fecha_factura = self.extract_date(text) or self.extract_filename_date(file_path)
+        result.fecha_factura = self.extract_edieuropa_invoice_date(text, file_path)
 
         subtotal, iva, total = self.extract_edieuropa_amounts(text)
         result.subtotal = subtotal if subtotal is not None else self.extract_subtotal(text)
@@ -120,11 +122,31 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
 
         return None
 
+    def extract_edieuropa_invoice_date(self, text: str, file_path: str | Path) -> str | None:
+        header_text = "\n".join(self.extract_lines(text)[:TEXT_SCAN_LINES])
+
+        for label_pattern in (
+            r"fecha\s+emisi[oó]n",
+            r"fecha\s+de\s+factura",
+            r"fecha\s+factura",
+            r"\bfecha\b",
+        ):
+            for match in re.finditer(
+                rf"{label_pattern}\s*[:\-]?\s*([^\n\r]+)",
+                header_text,
+                re.IGNORECASE,
+            ):
+                candidate = normalize_date(match.group(1))
+                if candidate:
+                    return candidate
+
+        return self.extract_date(text) or self.extract_filename_date(file_path)
+
     def _extract_amount(self, text: str, patterns: list[str]) -> re.Match[str] | None:
         for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match
+            matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            if matches:
+                return matches[-1]
         return None
 
     def _parse_amount_match(self, match: re.Match[str] | None) -> float | None:
@@ -238,27 +260,27 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         best_score: int | None = None
         best_triplet: tuple[float, float, float] | None = None
 
-        for total_index, total_value, total_rank in total_candidates:
-            for iva_index, iva_value, iva_rank in iva_candidates:
-                if iva_index > total_index:
+        for total_label_index, total_value_index, total_value, total_rank in total_candidates:
+            for iva_label_index, iva_value_index, iva_value, iva_rank in iva_candidates:
+                if iva_label_index > total_label_index:
                     continue
 
-                for base_index, base_value, base_rank in base_candidates:
-                    if base_index > iva_index:
+                for base_label_index, base_value_index, base_value, base_rank in base_candidates:
+                    if base_label_index > iva_label_index:
                         continue
 
-                    span = total_index - base_index
-                    if span > SUMMARY_MAX_SPAN:
+                    span = max(base_value_index, iva_value_index, total_value_index) - base_label_index
+                    if span > SUMMARY_MAX_SPAN + SUMMARY_LOOKAHEAD_LINES:
                         continue
 
                     if abs((base_value + iva_value) - total_value) > AMOUNT_TOLERANCE:
                         continue
 
                     score = (
-                        total_rank * 10000
-                        + iva_rank * 100
+                        total_rank * 1000000
+                        + iva_rank * 10000
                         + base_rank
-                        + total_index
+                        + total_value_index * 10
                         - span
                     )
                     if best_score is None or score > best_score:
@@ -274,26 +296,70 @@ class EdieuropaInvoiceParser(BaseInvoiceParser):
         label_rules: list[tuple[str, int]],
         *,
         ignore_percent: bool,
-    ) -> list[tuple[int, float, int]]:
-        candidates: list[tuple[int, float, int]] = []
+    ) -> list[tuple[int, int, float, int]]:
+        candidates: list[tuple[int, int, float, int]] = []
 
         for relative_index, line in enumerate(lines):
-            rank: int | None = None
-            for pattern_text, pattern_rank in label_rules:
-                if re.search(pattern_text, line, re.IGNORECASE):
-                    rank = pattern_rank
+            label_match = self._match_summary_label(line, label_rules)
+            if label_match is None:
+                continue
+
+            label_end, rank = label_match
+            fragments: list[tuple[int, str, int]] = [
+                (relative_index, line[label_end:], 20),
+            ]
+
+            for lookahead in range(1, SUMMARY_LOOKAHEAD_LINES + 1):
+                candidate_index = relative_index + lookahead
+                if candidate_index >= len(lines):
                     break
 
-            if rank is None:
-                continue
+                candidate_line = lines[candidate_index]
+                if self._has_summary_label(candidate_line):
+                    break
 
-            values = self.extract_amounts_from_fragment(line, ignore_percent=ignore_percent)
-            if not values:
-                continue
+                if re.fullmatch(r"[-\s:._]+", candidate_line):
+                    continue
 
-            candidates.append((line_offset + relative_index, abs(values[-1]), rank))
+                fragments.append((candidate_index, candidate_line, max(0, 20 - lookahead * 5)))
+
+            seen_local: set[tuple[int, float]] = set()
+            for value_index, fragment, source_bonus in fragments:
+                values = self.extract_amounts_from_fragment(fragment, ignore_percent=ignore_percent)
+                for value in values:
+                    amount = abs(value)
+                    dedupe_key = (value_index, amount)
+                    if dedupe_key in seen_local:
+                        continue
+                    seen_local.add(dedupe_key)
+                    candidates.append(
+                        (
+                            line_offset + relative_index,
+                            line_offset + value_index,
+                            amount,
+                            rank + source_bonus,
+                        )
+                    )
 
         return candidates
+
+    def _match_summary_label(
+        self,
+        line: str,
+        label_rules: list[tuple[str, int]],
+    ) -> tuple[int, int] | None:
+        for pattern_text, pattern_rank in label_rules:
+            match = re.search(pattern_text, line, re.IGNORECASE)
+            if match:
+                return match.end(), pattern_rank
+        return None
+
+    def _has_summary_label(self, line: str) -> bool:
+        return re.search(
+            r"base\s+imponible|subtotal|cuota\s+iva|\biva\b|total\s+factura|importe\s+total|\btotal\b",
+            line,
+            re.IGNORECASE,
+        ) is not None
 
     def _match_invoice_number(self, value: str, *, allow_bare_year: bool) -> str | None:
         cleaned = re.sub(r"\s+", " ", value).strip()
