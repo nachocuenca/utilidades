@@ -215,7 +215,9 @@ class LocalExtractor:
 
         url = settings.ollama_base_url.rstrip("/") + "/generate"
 
-        resp = requests.post(url, json=payload, timeout=120)
+        import os
+        timeout = int(os.getenv("OLLAMA_TIMEOUT", "600"))
+        resp = requests.post(url, json=payload, timeout=timeout)
         resp.raise_for_status()
         body = resp.json()
 

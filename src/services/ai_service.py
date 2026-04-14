@@ -10,6 +10,7 @@ from src.ai.local_extractor import LocalExtractor
 from src.db.repositories import InvoiceRepository
 from src.db.models import InvoiceUpsertData
 from src.utils.hashing import sha256_file
+from src.utils.dates import normalize_date
 
 
 class AIService:
@@ -33,15 +34,76 @@ class AIService:
     def process_file(self, pdf_path: str | Path, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         pdf_path = Path(pdf_path)
         result = self.extractor.extract_from_pdf(pdf_path, context=context)
-        is_valid, warnings = self.validator.validate(result)
+        # Normalize minimal fields before validation
+        norm = self._normalize_extraction(result)
+        is_valid, warnings = self.validator.validate(norm)
 
         # Attach validation metadata
         result_meta = {
-            "extraction": result,
+            "extraction": norm,
             "is_valid": is_valid,
             "warnings": warnings,
         }
         return result_meta
+
+    def _normalize_extraction(self, extraction: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply minimal normalization required before validation.
+
+        - normalize `tipo_documento` to expected enum values
+        - sanitize NIFs (remove spaces and dashes)
+        - normalize `fecha_factura` using `normalize_date`
+        - ensure numeric amounts are floats if possible
+        """
+        data = dict(extraction) if extraction else {}
+
+        # tipo_documento normalization
+        td = (data.get("tipo_documento") or "").strip()
+        td_up = td.upper().replace(" ", "_")
+        if td_up in {"FACTURA", "FACTURA_ELECTRONICA"}:
+            data["tipo_documento"] = "factura"
+        elif td_up in {"TICKET", "TICKET_FACTURA"}:
+            data["tipo_documento"] = "ticket"
+        elif td_up in {"NO_FISCAL", "NO-FISCAL", "NO FISCAL", "NOFISCAL"}:
+            data["tipo_documento"] = "no_fiscal"
+        else:
+            # fallback: lowercase value or 'desconocido'
+            low = td.lower()
+            data["tipo_documento"] = low if low in {"factura", "ticket", "no_fiscal", "desconocido"} else (low or "desconocido")
+
+        # NIF normalization helper
+        def clean_nif(v: Any) -> Any:
+            if not v:
+                return None
+            s = str(v).upper()
+            s = s.replace("-", "").replace(" ", "").replace(".", "")
+            return s
+
+        data["nif_proveedor"] = clean_nif(data.get("nif_proveedor"))
+        data["nif_cliente"] = clean_nif(data.get("nif_cliente"))
+
+        # fecha_factura normalization
+        try:
+            data["fecha_factura"] = normalize_date(data.get("fecha_factura"))
+        except Exception:
+            # leave original if normalization fails
+            pass
+
+        # amounts: safe cast to float
+        for key in ("subtotal", "iva", "total"):
+            val = data.get(key)
+            if val is None:
+                continue
+            if isinstance(val, (int, float)):
+                data[key] = float(val)
+                continue
+            try:
+                s = str(val).strip().replace('.', '').replace(',', '.') if isinstance(val, str) and (',' in val or '.' in val) else str(val)
+                data[key] = float(s)
+            except Exception:
+                # keep original if cannot parse
+                data[key] = val
+
+        return data
 
     def process_many(self, pdf_paths: List[str | Path], context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
