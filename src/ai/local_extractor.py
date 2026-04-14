@@ -162,7 +162,7 @@ class LocalExtractor:
             except Exception:
                 pass
 
-    def _extract_with_ollama(self, pdf_path: str | Path, settings) -> Dict[str, Any]:
+    def _extract_with_ollama(self, pdf_path: str | Path, settings, debug: bool = False) -> Dict[str, Any]:
         """Call local Ollama server to process PDF images and return structured JSON.
 
         Uses POST {OLLAMA_BASE_URL}/generate with JSON body:
@@ -197,18 +197,32 @@ class LocalExtractor:
             "required": ["tipo_documento", "confidence", "warnings", "evidence_snippets"],
         }
 
+        # Try to provide OCR text to the model to improve grounding (explicitly anchor to PDF content)
+        ocr_text = None
+        try:
+            ocr_text = read_pdf_text_only(pdf_path)
+        except Exception:
+            ocr_text = None
+
         prompt = (
             "Procesa las imágenes adjuntas (páginas de una factura) y devuelve EXACTAMENTE un objeto JSON con los campos: "
             "tipo_documento, nombre_proveedor, nif_proveedor, nombre_cliente, nif_cliente, cp_cliente, numero_factura, "
             "fecha_factura, subtotal, iva, total, confidence, warnings, evidence_snippets. "
-            "Devuelve null para campos no disponibles. No agregues texto adicional, solo JSON."
+            "DEVOLVER SOLO JSON. NO INVENTAR VALORES DE EJEMPLO BAJO NINGUN CONCEPTO. Si un campo no es claramente legible en las imágenes, devuelve null para ese campo. "
+            "Por ejemplo: NO uses nombres ficticios como 'Empresa XYZ' ni 'Cliente ABC', ni NIFs de ejemplo como 'A12345678'. "
+            "Nunca rellenes con valores de plantilla ni ejemplos; si no está en la imagen, devuelve null. "
+            "Incluye todas las claves del esquema en el JSON (pueden ser null) y no añadas texto explicativo ni ejemplos."
         )
+
+        if ocr_text:
+            # Append OCR text as an explicit source of truth for grounding
+            prompt = prompt + "\n\nTEXTO_OCR_EXTRAIDO:\n" + ocr_text
 
         # Use Ollama chat endpoint to request structured JSON via format/schema
         payload = {
             "model": settings.local_model_name,
             "messages": [
-                {"role": "system", "content": "Eres un extractor que devuelve SOLO JSON estructurado según el esquema solicitado."},
+                {"role": "system", "content": "Eres un extractor que devuelve SOLO JSON estructurado según el esquema solicitado. NO INVENTES VALORES DE EJEMPLO. Si no ves el dato en las imágenes, responde null para ese campo."},
                 {"role": "user", "content": prompt},
             ],
             "images": images_b64,
@@ -274,5 +288,117 @@ class LocalExtractor:
         ]:
             if k not in extraction:
                 extraction[k] = None if k not in ("confidence", "warnings", "evidence_snippets") else (0.0 if k=="confidence" else [])
+
+        # Detect obvious placeholder/template values in the extraction (evidence or fields)
+        placeholders_indicators = [
+            "Empresa XYZ",
+            "Cliente ABC",
+            "A12345678",
+            "B98765432",
+            "12345",
+            "Empresa",
+            "Cliente",
+            "XYZ",
+            "ABC",
+        ]
+
+        def has_placeholders(obj):
+            if obj is None:
+                return False
+            if isinstance(obj, str):
+                for p in placeholders_indicators:
+                    if p in obj:
+                        return True
+                return False
+            if isinstance(obj, list):
+                for it in obj:
+                    if has_placeholders(it):
+                        return True
+                return False
+            if isinstance(obj, dict):
+                for v in obj.values():
+                    if has_placeholders(v):
+                        return True
+                return False
+            return False
+
+        if has_placeholders(extraction):
+            # Attempt a second, stricter extraction: force exact-match extraction from OCR text
+            ocr_text_block = ocr_text or read_pdf_text_only(pdf_path) or ""
+            strict_prompt = (
+                "Usa solo el siguiente TEXTO_OCR como fuente de verdad. Para cada campo, busca su valor EXACTO como SUBCADENA en el TEXTO_OCR. "
+                "Si no encuentras una coincidencia exacta para el campo, devuelve null para ese campo. \n\n"
+                f"TEXTO_OCR:\n{ocr_text_block}\n\n"
+                "Devuelve SOLO JSON con las mismas claves que antes. No inventes valores y no agregues texto."
+            )
+
+            payload2 = {
+                "model": settings.local_model_name,
+                "messages": [
+                    {"role": "system", "content": "Eres un extractor estricto: solo extraes valores que aparecen textualmente en TEXTO_OCR. Si no aparece, pon null."},
+                    {"role": "user", "content": strict_prompt},
+                ],
+                "images": images_b64,
+                "format": schema,
+                "temperature": 0,
+                "stream": False,
+                "raw": False,
+            }
+
+            import os
+            timeout = int(os.getenv("OLLAMA_TIMEOUT", "600"))
+            resp2 = requests.post(url, json=payload2, timeout=timeout)
+            resp2.raise_for_status()
+            body2 = resp2.json()
+
+            gen2 = None
+            if isinstance(body2.get("message"), dict):
+                gen2 = body2["message"].get("content")
+            elif isinstance(body2.get("response"), dict):
+                gen2 = body2["response"].get("content") or body2["response"].get("response")
+            elif isinstance(body2.get("choices"), list) and body2["choices"]:
+                first = body2["choices"][0]
+                if isinstance(first, dict) and isinstance(first.get("message"), dict):
+                    gen2 = first["message"].get("content")
+                else:
+                    gen2 = first.get("content") if isinstance(first, dict) else None
+            else:
+                gen2 = body2.get("response")
+
+            if gen2 is not None:
+                try:
+                    extraction2 = json.loads(gen2) if isinstance(gen2, str) else gen2
+                except Exception:
+                    extraction2 = None
+            else:
+                extraction2 = None
+
+            if extraction2:
+                # ensure keys and return the stricter extraction
+                for k in [
+                    "tipo_documento",
+                    "nombre_proveedor",
+                    "nif_proveedor",
+                    "nombre_cliente",
+                    "nif_cliente",
+                    "cp_cliente",
+                    "numero_factura",
+                    "fecha_factura",
+                    "subtotal",
+                    "iva",
+                    "total",
+                    "confidence",
+                    "warnings",
+                    "evidence_snippets",
+                ]:
+                    if k not in extraction2:
+                        extraction2[k] = None if k not in ("confidence", "warnings", "evidence_snippets") else (0.0 if k=="confidence" else [])
+                if debug:
+                    return extraction2, gen2
+                return extraction2
+
+        # If debug requested, also return the raw generated text alongside the normalized extraction
+        if debug:
+            return extraction, generated
 
         return extraction
