@@ -15,7 +15,17 @@ CUSTOMER_NAME_INLINE_PATTERN = re.compile(
 )
 
 CUSTOMER_TAX_ID_PATTERN = re.compile(
-    r"C\.?I\.?F\.?\s*/\s*N\.?I\.?F\.?\s*Titular:\s*([A-Z0-9]+)",
+    r"C\.?I\.?F\.?\s*/\s*N\.?I\.?F\.?\s*Titular:\s*([^\n\r]*)",
+    re.IGNORECASE,
+)
+
+CUSTOMER_POSTAL_CODE_PATTERN = re.compile(
+    r"(?:c\.?p\.?|cp|c[oó]digo\s+postal)\s*[:\-]?\s*(\d{5})",
+    re.IGNORECASE,
+)
+
+CUSTOMER_FIELD_BOUNDARY_PATTERN = re.compile(
+    r"\b(?:provincia|direcci[oó]n|c\.?p\.?|cp|c[oó]digo\s+postal|titular|factura|fecha)\b\s*:?",
     re.IGNORECASE,
 )
 
@@ -87,11 +97,13 @@ class AgusInvoiceParser(BaseInvoiceParser):
         lines = self.extract_lines(text)
         result = self.build_result(text, file_path)
         result.parser_usado = self.parser_name
+        raw_customer_tax_id = self.extract_clinica_customer_tax_id(text)
 
         result.nombre_proveedor = CLINICA_PROVIDER_NAME
         result.nif_proveedor = self.extract_clinica_provider_tax_id(text, lines)
         result.nombre_cliente = self.extract_clinica_customer_name(text, lines)
-        result.nif_cliente = self.extract_clinica_customer_tax_id(text)
+        result.nif_cliente = raw_customer_tax_id
+        result.cp_cliente = self.extract_clinica_customer_postal_code(text, lines)
         result.numero_factura = self.extract_clinica_invoice_number(text)
         result.fecha_factura = self.extract_clinica_date(text)
         result.subtotal = self.extract_labeled_amount(text, [r"subtotal"])
@@ -101,7 +113,11 @@ class AgusInvoiceParser(BaseInvoiceParser):
             if round(float(result.subtotal) - float(result.total), 2) == 0:
                 result.iva = 0.0
 
-        return result.finalize()
+        result = result.finalize()
+        if raw_customer_tax_id and result.nif_cliente is None:
+            result.nif_cliente = raw_customer_tax_id
+
+        return result
 
     def extract_clinica_customer_name(self, text: str, lines: list[str]) -> str | None:
         match = CUSTOMER_NAME_INLINE_PATTERN.search(text)
@@ -131,7 +147,38 @@ class AgusInvoiceParser(BaseInvoiceParser):
     def extract_clinica_customer_tax_id(self, text: str) -> str | None:
         match = CUSTOMER_TAX_ID_PATTERN.search(text)
         if match:
+            candidate = CUSTOMER_FIELD_BOUNDARY_PATTERN.split(match.group(1), maxsplit=1)[0]
+            candidate = candidate.strip(" .,:;-")
+            if candidate:
+                return candidate
+        return None
+
+    def extract_clinica_customer_postal_code(self, text: str, lines: list[str]) -> str | None:
+        customer_start_index = None
+
+        for index, line in enumerate(lines):
+            lowered = line.lower()
+            if "titular" in lowered or "c.i.f." in lowered or "n.i.f." in lowered:
+                customer_start_index = index
+                break
+
+        if customer_start_index is not None:
+            window = lines[customer_start_index : customer_start_index + 6]
+
+            for line in window:
+                match = CUSTOMER_POSTAL_CODE_PATTERN.search(line)
+                if match:
+                    return match.group(1)
+
+            for line in window:
+                candidate = line.strip()
+                if re.fullmatch(r"\d{5}", candidate):
+                    return candidate
+
+        match = CUSTOMER_POSTAL_CODE_PATTERN.search(text)
+        if match:
             return match.group(1)
+
         return None
 
     def extract_clinica_provider_tax_id(self, text: str, lines: list[str]) -> str:
