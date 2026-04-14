@@ -18,6 +18,8 @@ except Exception:
     pdfium = None
 
 
+
+
 class LocalExtractor:
     """Simple local extractor that uses PDF text extraction + heuristics
     to fill the invoice extraction schema. This is a lightweight local
@@ -42,26 +44,59 @@ class LocalExtractor:
         text = read_pdf_text_only(pdf_path)
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
 
-        def find_first(patterns: List[str]) -> Optional[str]:
+        def find_first(patterns: List[str], exclude: Optional[list] = None) -> Optional[str]:
+            exclude = exclude or []
             for p in patterns:
                 rx = re.compile(p, re.IGNORECASE)
                 for ln in lines:
+                    if any(x in ln for x in exclude):
+                        continue
                     m = rx.search(ln)
                     if m:
-                        return m.group(1).strip() if m.groups() else ln
+                        g = m.group(1) if m.groups() else ln
+                        if g is not None:
+                            return g.strip() if isinstance(g, str) else str(g)
+                        else:
+                            return ln
             return None
 
         # heuristics
-        numero = find_first([r"n[úu]mero[:\s]*([A-Za-z0-9\-\/]+)", r"factura[:\s]*([A-Za-z0-9\-\/]+)", r"n[oº]\.?[:\s]*([0-9\-\/]+)"])
-        fecha = find_first([r"(\d{2}[\/\-]\d{2}[\/\-]\d{4})", r"(\d{4}[\-]\d{2}[\-]\d{2})"])
-
-        # nif pattern: spanish NIF/CIF (simplified)
-        nif = find_first([r"([A-ZÑa-zñ0-9]{1,2}\d{7}[A-Z0-9])", r"\b([0-9]{8}[A-Z])\b"]) or None
-
+        # Mejor número de factura: ignora palabras sueltas y busca patrones robustos
+        numero = find_first([
+            r"factura[\s\-:]*([A-Za-z0-9\-/ ]{4,})",
+            r"n[úu]mero[\s\-:]*([A-Za-z0-9\-/ ]{4,})",
+            r"No Factura[\s\-:]*([A-Za-z0-9\-/ ]{4,})"
+        ], exclude=["No ", "de", "N "])
+        # Fecha: normaliza a ISO si es posible
+        import datetime
+        fecha_raw = find_first([r"(\d{2}[\/\-]\d{2}[\/\-]\d{4})", r"(\d{4}[\-]\d{2}[\-]\d{2})"], exclude=[])
+        fecha = None
+        numero = find_first([
+            r"factura[\s\-:]*([A-Za-z0-9\-/ ]{4,})",
+            r"n[úu]mero[\s\-:]*([A-Za-z0-9\-/ ]{4,})",
+            r"No Factura[\s\-:]*([A-Za-z0-9\-/ ]{4,})"
+        ], exclude=["No ", "de", "N "])
+        # Fecha: normaliza a ISO si es posible
+        import datetime
+        fecha_raw = find_first([r"(\d{2}[\/\-]\d{2}[\/\-]\d{4})", r"(\d{4}[\-]\d{2}[\-]\d{2})"], exclude=[])
+        fecha = None
+        if fecha_raw:
+            try:
+                if "/" in fecha_raw:
+                    fecha = datetime.datetime.strptime(fecha_raw, "%d/%m/%Y").date().isoformat()
+                elif "-" in fecha_raw:
+                    fecha = datetime.datetime.strptime(fecha_raw, "%Y-%m-%d").date().isoformat()
+            except Exception:
+                fecha = fecha_raw
+        # NIF: prioriza patrón correcto y evita confundir con otros números
+        nif = find_first([r"\b([A-ZÑa-zñ]{1,2}\d{7}[A-Z0-9])\b", r"\b([0-9]{8}[A-Z])\b"], exclude=[]) or None
         # amounts: look for lines with total, subtotal, iva
         def find_amount(keyword: str) -> Optional[float]:
-            rx = re.compile(rf"{keyword}[^0-9\-\,\.]*(\d+[\d\.,]*\d)", re.IGNORECASE)
+            # Busca línea con 'TOTAL' y cifra al final, evita parciales
+            rx = re.compile(rf"{keyword}[^0-9\-\,\.\*]*(\d+[\d\.,]*\d)$", re.IGNORECASE)
             for ln in lines[::-1]:
+                if any(x in ln.lower() for x in ["parcial", "albaran", "recibo", "puente", "urbano"]):
+                    continue
                 m = rx.search(ln)
                 if m:
                     g = m.group(1) if m.groups() else None
@@ -73,7 +108,6 @@ class LocalExtractor:
                     except Exception:
                         continue
             return None
-
         total = find_amount(r"total")
         iva = find_amount(r"iva|tax")
         subtotal = None
@@ -82,18 +116,14 @@ class LocalExtractor:
                 subtotal = round(total - iva, 2)
             except Exception:
                 subtotal = None
-
-        provider = find_first([r"^(.*)\bS\.L\.U\.|^(.+?)\s+S\.L\.?", r"^(.+?)\s+S\.A\.", r"proveedor[:\s]*(.+)"])
-        client = find_first([r"cliente[:\s]*(.+)", r"destinatario[:\s]*(.+)"])
-
-        warnings: List[str] = []
-        if total is None:
-            warnings.append("No se encontró total claramente.")
-        if nif is None:
-            warnings.append("No se detectó NIF claramente.")
-
-        confidence = 0.85 if total is not None and nif is not None else 0.5
-
+        # Proveedor: ignora líneas con CLIENTE o NOMBRE, busca S.L., S.A., o líneas en mayúsculas
+        provider = find_first([
+            r"^(.*)\bS\.L\.U\.",
+            r"^(.+?)\s+S\.L\.\b",
+            r"^(.+?)\s+S\.A\.\b",
+            r"proveedor[:\s]*(.+)"
+        ], exclude=["CLIENTE", "NOMBRE:"])
+        client = find_first([r"cliente[:\s]*(.+)", r"destinatario[:\s]*(.+)"], exclude=[])
         evidence: List[str] = []
         # collect lines that contain key hits
         keys = ["total", "iva", "subtotal", "factura", "nif", "cliente", "proveedor"]
@@ -104,6 +134,12 @@ class LocalExtractor:
                 if len(evidence) >= 10:
                     break
 
+        confidence = 0.85 if total is not None and nif is not None else 0.5
+        warnings = []
+        if total is None:
+            warnings.append("No se encontró total claramente.")
+        if nif is None:
+            warnings.append("No se detectó NIF claramente.")
         result = {
             "tipo_documento": "factura",
             "nombre_proveedor": provider,
