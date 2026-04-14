@@ -70,6 +70,11 @@ class Settings:
     default_customer_name: str
     default_customer_tax_id: str
     default_customer_postal_code: str
+    openai_api_key: str
+    openai_model: str
+    openai_fallback_enabled: bool
+    openai_fallback_min_confidence: float
+    openai_timeout: int
 
 
 def ensure_runtime_directories(settings: Settings) -> None:
@@ -106,6 +111,11 @@ def get_settings() -> Settings:
         default_customer_name=_get_env("DEFAULT_CUSTOMER_NAME", ""),
         default_customer_tax_id=_get_env("DEFAULT_CUSTOMER_TAX_ID", ""),
         default_customer_postal_code=_get_env("DEFAULT_CUSTOMER_POSTAL_CODE", ""),
+        openai_api_key=_get_env("OPENAI_API_KEY", ""),
+        openai_model=_get_env("OPENAI_MODEL", "gpt-4o"),
+        openai_fallback_enabled=_get_bool_env("OPENAI_FALLBACK_ENABLED", False),
+        openai_fallback_min_confidence=float(_get_env("OPENAI_FALLBACK_MIN_CONFIDENCE", "0.7")),
+        openai_timeout=_get_int_env("OPENAI_TIMEOUT", 40),
     )
 
     ensure_runtime_directories(settings)

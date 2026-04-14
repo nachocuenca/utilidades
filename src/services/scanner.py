@@ -13,6 +13,8 @@ from src.pdf.reader import read_pdf_text
 from src.utils.files import list_pdf_files
 from src.utils.hashing import sha256_file
 from src.utils.ids import normalize_postal_code, normalize_tax_id
+from src.ai.openai_extractor import OpenAIExtractor
+from src.ai.validator import InvoiceAIValidator
 
 
 @dataclass(slots=True)
@@ -411,6 +413,78 @@ class InvoiceScanner:
             text=read_result.text,
         )
 
+        # Decide si aplicar fallback IA: solo si el parser fue genérico o faltan campos clave
+        apply_ai = False
+        try:
+            if self.settings.openai_fallback_enabled:
+                if parsed.parser_usado == "generic":
+                    apply_ai = True
+                if parsed.subtotal is None or parsed.total is None:
+                    apply_ai = True
+                if requires_review:
+                    apply_ai = True
+        except Exception:
+            apply_ai = False
+
+        ai_data = None
+        ai_warnings: list[str] = []
+        ai_used = False
+        if apply_ai:
+            try:
+                extractor = OpenAIExtractor(api_key=self.settings.openai_api_key, model=self.settings.openai_model)
+                # Context: provide minimal folder and matched parsers
+                context = {
+                    "folder_origin": folder_origin,
+                    "matched_parsers": resolution.matched_parsers,
+                }
+                ai_data = extractor.extract_from_pdf(pdf_path, context=context)
+                ai_used = True
+                is_valid, ai_warnings = InvoiceAIValidator.validate(ai_data)
+                if not is_valid:
+                    requires_review = True
+                    review_reason = (review_reason or "") + " IA: " + "; ".join(ai_warnings)
+            except Exception as e:
+                # If IA call fails, keep previous parsed result and mark for review
+                requires_review = True
+                review_reason = (review_reason or "") + f" Fallback IA error: {e}"
+
+        if ai_used and ai_data:
+            # Build upsert using IA result, but keep traceability in motivo_revision
+            motivo = review_reason or ""
+            motivo = f"IA_used model={self.settings.openai_model} confidence={ai_data.get('confidence')}" + (f"; {motivo}" if motivo else "")
+
+            upsert_data = InvoiceUpsertData(
+                archivo=parsed.archivo,
+                ruta_archivo=parsed.ruta_archivo,
+                hash_archivo=file_hash,
+                tipo_documento=ai_data.get("tipo_documento", document_type),
+                parser_usado=f"openai_{self.settings.openai_model}",
+                extractor_origen="openai",
+                requiere_revision_manual=requires_review,
+                motivo_revision=motivo,
+                carpeta_origen=folder_origin,
+                nombre_proveedor=ai_data.get("nombre_proveedor"),
+                nif_proveedor=ai_data.get("nif_proveedor"),
+                nombre_cliente=ai_data.get("nombre_cliente"),
+                nif_cliente=ai_data.get("nif_cliente"),
+                cp_cliente=ai_data.get("cp_cliente"),
+                numero_factura=ai_data.get("numero_factura"),
+                fecha_factura=ai_data.get("fecha_factura"),
+                subtotal=ai_data.get("subtotal"),
+                iva=ai_data.get("iva"),
+                total=ai_data.get("total"),
+                texto_crudo=parsed.texto_crudo,
+            )
+
+            invoice_id = self.repository.upsert(upsert_data)
+            return {
+                "invoice_id": invoice_id,
+                "requires_review": requires_review,
+                "matched_parsers": resolution.matched_parsers + [upsert_data.parser_usado],
+                "document_type": upsert_data.tipo_documento,
+            }
+        
+        # Si no se usó IA o IA no pudo resolverse, seguimos con el parser original
         upsert_data = InvoiceUpsertData(
             archivo=parsed.archivo,
             ruta_archivo=parsed.ruta_archivo,
