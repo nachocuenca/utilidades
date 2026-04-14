@@ -204,16 +204,21 @@ class LocalExtractor:
             "Devuelve null para campos no disponibles. No agregues texto adicional, solo JSON."
         )
 
+        # Use Ollama chat endpoint to request structured JSON via format/schema
         payload = {
             "model": settings.local_model_name,
-            "prompt": prompt,
+            "messages": [
+                {"role": "system", "content": "Eres un extractor que devuelve SOLO JSON estructurado según el esquema solicitado."},
+                {"role": "user", "content": prompt},
+            ],
             "images": images_b64,
             "format": schema,
+            "temperature": 0,
             "stream": False,
             "raw": False,
         }
 
-        url = settings.ollama_base_url.rstrip("/") + "/generate"
+        url = settings.ollama_base_url.rstrip("/") + "/chat"
 
         import os
         timeout = int(os.getenv("OLLAMA_TIMEOUT", "600"))
@@ -221,15 +226,34 @@ class LocalExtractor:
         resp.raise_for_status()
         body = resp.json()
 
-        # Ollama returns generated text in body['response'] (string) when format is used it may be JSON string
-        generated = body.get("response")
-        if isinstance(generated, dict):
-            extraction = generated
+        # Prefer parsing from message.content as requested
+        generated = None
+        # Ollama chat may return 'message' or 'response' or 'choices'
+        if isinstance(body.get("message"), dict):
+            generated = body["message"].get("content")
+        elif isinstance(body.get("response"), dict):
+            # sometimes 'response' is dict
+            generated = body["response"].get("content") or body["response"].get("response")
+        elif isinstance(body.get("choices"), list) and body["choices"]:
+            first = body["choices"][0]
+            if isinstance(first, dict) and isinstance(first.get("message"), dict):
+                generated = first["message"].get("content")
+            else:
+                generated = first.get("content") if isinstance(first, dict) else None
         else:
-            try:
-                extraction = json.loads(generated)
-            except Exception as e:
-                raise RuntimeError(f"No se pudo parsear respuesta de Ollama como JSON: {e}\n{generated}") from e
+            generated = body.get("response")
+
+        if generated is None:
+            # fallback to raw body as string
+            raw = json.dumps(body, ensure_ascii=False)
+            raise RuntimeError(f"No se encontró contenido de mensaje en respuesta de Ollama. Body: {raw}")
+
+        # Attempt to parse JSON from generated content
+        try:
+            extraction = json.loads(generated) if isinstance(generated, str) else generated
+        except Exception as e:
+            # Provide raw content and error per user request
+            raise RuntimeError(f"No se pudo parsear respuesta de Ollama como JSON: {e}\nRAW_CONTENT_START\n{generated}\nRAW_CONTENT_END") from e
 
         # Ensure shape contains required keys
         for k in [
