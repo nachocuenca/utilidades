@@ -75,6 +75,10 @@ class Settings:
     openai_fallback_enabled: bool
     openai_fallback_min_confidence: float
     openai_timeout: int
+    local_model_enabled: bool
+    local_model_provider: str
+    local_model_name: str
+    ollama_base_url: str
 
 
 def ensure_runtime_directories(settings: Settings) -> None:
@@ -116,6 +120,10 @@ def get_settings() -> Settings:
         openai_fallback_enabled=_get_bool_env("OPENAI_FALLBACK_ENABLED", False),
         openai_fallback_min_confidence=float(_get_env("OPENAI_FALLBACK_MIN_CONFIDENCE", "0.7")),
         openai_timeout=_get_int_env("OPENAI_TIMEOUT", 40),
+            local_model_enabled=_get_bool_env("LOCAL_MODEL_ENABLED", False),
+            local_model_provider=_get_env("LOCAL_MODEL_PROVIDER", "ollama"),
+            local_model_name=_get_env("LOCAL_MODEL_NAME", "qwen2.5vl:7b"),
+            ollama_base_url=_get_env("OLLAMA_BASE_URL", "http://localhost:11434/api"),
     )
 
     ensure_runtime_directories(settings)
