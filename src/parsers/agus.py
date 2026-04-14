@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
 
@@ -9,9 +8,6 @@ from src.parsers.generic import GenericInvoiceParser
 
 CLINICA_PROVIDER_NAME = "Clinica Almendros"
 CLINICA_PROVIDER_TAX_ID = "48331209K"
-MODULE_PATH = Path(__file__).resolve()
-MODULE_MTIME_NS = MODULE_PATH.stat().st_mtime_ns
-MODULE_SHA256 = hashlib.sha256(MODULE_PATH.read_bytes()).hexdigest()
 
 CUSTOMER_NAME_INLINE_PATTERN = re.compile(
     r"Titular:\s*(.+)",
@@ -113,16 +109,6 @@ class AgusInvoiceParser(BaseInvoiceParser):
         result.fecha_factura = self.extract_clinica_date(text)
         result.subtotal = self.extract_labeled_amount(text, [r"subtotal"])
         result.total = self.extract_labeled_amount(text, [r"total"])
-        result.metadatos.update(
-            {
-                "agus_trace_module_file": str(MODULE_PATH),
-                "agus_trace_module_mtime_ns": str(MODULE_MTIME_NS),
-                "agus_trace_module_sha256": MODULE_SHA256,
-                "agus_trace_is_clinica_layout": "true",
-                "agus_trace_raw_customer_tax_id": raw_customer_tax_id or "",
-                "agus_trace_raw_customer_postal_code": raw_customer_postal_code or "",
-            }
-        )
 
         if result.subtotal is not None and result.total is not None:
             if round(float(result.subtotal) - float(result.total), 2) == 0:
@@ -131,13 +117,6 @@ class AgusInvoiceParser(BaseInvoiceParser):
         result = result.finalize()
         if raw_customer_tax_id and result.nif_cliente is None:
             result.nif_cliente = raw_customer_tax_id
-
-        result.metadatos.update(
-            {
-                "agus_trace_parser_return_nif_cliente": result.nif_cliente or "",
-                "agus_trace_parser_return_cp_cliente": result.cp_cliente or "",
-            }
-        )
 
         return result
 
