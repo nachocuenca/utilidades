@@ -397,8 +397,325 @@ class LocalExtractor:
                     return extraction2, gen2
                 return extraction2
 
-        # If debug requested, also return the raw generated text alongside the normalized extraction
-        if debug:
-            return extraction, generated
+        # Apply deterministic postprocessing to correct mapping errors
+        try:
+            post = self._postprocess_extraction(extraction, ocr_text or "", images_b64)
+        except Exception:
+            post = extraction
 
-        return extraction
+        if debug:
+            return post, generated
+
+        return post
+
+    def _postprocess_extraction(self, extraction: Dict[str, Any], ocr_text: str, images_b64: List[str]) -> Dict[str, Any]:
+        """Deterministic postprocessing to correct field mapping issues.
+
+        Rules implemented per task instructions.
+        """
+        out = dict(extraction)  # copy
+
+        text = ocr_text or ""
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+        # helper: search lines containing pattern
+        def find_lines(regex):
+            rx = re.compile(regex, re.IGNORECASE)
+            return [ln for ln in lines if rx.search(ln)]
+
+        # Build company -> nif mapping by scanning company-like lines followed by CIF/NIF
+        company_nif_map: Dict[str, str] = {}
+        def is_company_line_simple(s: str) -> bool:
+            return bool(re.search(r'\bS\.L\.|\bS\.A\.|\bS\.L\.U\b|,', s, re.IGNORECASE) or (len(re.findall(r"[A-Za-z]+", s))>=2 and sum(1 for w in re.findall(r"[A-Za-z]+", s) if w.isupper())>=1))
+        for i, ln in enumerate(lines):
+            if is_company_line_simple(ln):
+                # look ahead for CIF/NIF in next 3 lines
+                for j in range(i, min(i+4, len(lines))):
+                    m = re.search(r'\bCIF[:\s]*([A-Za-z0-9\-]+)', lines[j], re.IGNORECASE)
+                    if m:
+                        company_nif_map[ln] = m.group(1)
+                        break
+                    m2 = re.search(r'\bNIF[:\s]*([A-Za-z0-9\-]+)', lines[j], re.IGNORECASE)
+                    if m2:
+                        company_nif_map[ln] = m2.group(1)
+                        break
+
+        # 1. nombre_proveedor: prefer entity near nif_proveedor or header
+        np_val = out.get("nombre_proveedor")
+        nif_prov = out.get("nif_proveedor")
+        # Rule: If a company appears next to a CIF/NIF (CIF: <code>), that company is the provider.
+        # Search for explicit CIF: patterns and take nearest company name (previous non-empty line).
+        cif_matches = []
+        for i, ln in enumerate(lines):
+            m = re.search(r'\bCIF[:\s]*([A-Za-z0-9\-]+)', ln, re.IGNORECASE)
+            if m:
+                cif_matches.append((m.group(1), i, ln))
+        if cif_matches:
+            # prefer match equal to nif_prov if available
+            chosen = None
+            for val, idx, ln in cif_matches:
+                if nif_prov and val.replace('-', '').upper() == str(nif_prov).replace('-', '').upper():
+                    chosen = (val, idx)
+                    break
+            if not chosen:
+                chosen = cif_matches[0]
+            val, idx = chosen[0], chosen[1]
+            # find company line: prefer previous 1-3 lines that look like a company name
+            def is_company_line(s: str) -> bool:
+                if re.search(r'\bS\.L\.|\bS\.A\.|\bS\.L\.U\b|CIF:|NIF:', s, re.IGNORECASE):
+                    return True
+                # many uppercase words or commas typical in headings
+                words = [w for w in re.findall(r"[A-Za-zÑÁÉÍÓÚáéíóú]+", s)]
+                if len(words) >= 2 and sum(1 for w in words if w.isupper()) >= 1:
+                    return True
+                return False
+
+            cand = None
+            for j in range(idx-1, max(-1, idx-4), -1):
+                if j < 0: break
+                ln2 = lines[j]
+                if is_company_line(ln2) and not re.search(r'tel|telefono|direccion|fecha', ln2, re.IGNORECASE):
+                    cand = ln2
+                    break
+            if cand:
+                np_val = cand
+        # fallback: look for header lines with company indicators
+        if not np_val:
+            for ln in lines[:6]:
+                if re.search(r'\bS\.L\.|\bS\.A\.|CIF:|NIF:', ln, re.IGNORECASE):
+                    np_val = ln
+                    break
+        out['nombre_proveedor'] = np_val
+
+        # 2. nombre_cliente: prefer entity near nif_cliente or 'cliente' block
+        nc_val = out.get('nombre_cliente')
+        nif_cli = out.get('nif_cliente')
+        # Rule: If there is a 'Numero NIF' label or a client block containing a NIF, map that nearby entity as cliente.
+        # Look for lines with 'Numero NIF' or 'Numero NIF :' and take nearby company as client.
+        client_nif_matches = []
+        for i, ln in enumerate(lines):
+            m = re.search(r'Numero\s*NIF[:\s]*([A-Za-z0-9\-]+)', ln, re.IGNORECASE)
+            if m:
+                client_nif_matches.append((m.group(1), i, ln))
+        if client_nif_matches and not nc_val:
+            val, idx, ln = client_nif_matches[0]
+            # prefer nearby company-like line (within -2..+2)
+            cand = None
+            for j in range(idx-2, idx+3):
+                if j < 0 or j >= len(lines):
+                    continue
+                s = lines[j]
+                if len(re.sub(r'[^A-Za-z0-9]', '', s)) < 4:
+                    continue
+                # prefer lines with S.L/S.A or uppercase tokens
+                if re.search(r'\bS\.L\.|\bS\.A\.|\bS\.L\.U\b', s, re.IGNORECASE) or sum(1 for w in re.findall(r"[A-Za-z]+", s) if w.isupper())>=1:
+                    cand = s
+                    break
+            if not cand:
+                if idx+1 < len(lines):
+                    cand = lines[idx+1]
+                elif idx>0:
+                    cand = lines[idx-1]
+            if cand and (cand != out.get('nombre_proveedor')):
+                nc_val = cand
+        if nif_cli:
+            candidates = [ln for ln in lines if nif_cli.replace(' ', '') in ln.replace(' ', '')]
+            if candidates:
+                idx = lines.index(candidates[0])
+                # take previous line if it's not provider
+                if idx > 0:
+                    cand = lines[idx-1]
+                    if cand != out.get('nombre_proveedor'):
+                        nc_val = cand
+        # If company_nif_map maps a company to the provider nif, set provider accordingly
+        # and likewise for client mappings
+        try:
+            # invert map: nif -> company
+            nif_to_company = {v.replace('-', '').upper(): k for k, v in company_nif_map.items()}
+            if nif_prov:
+                key = str(nif_prov).replace('-', '').upper()
+                if key in nif_to_company:
+                    out['nombre_proveedor'] = nif_to_company[key]
+            if client_nif_matches:
+                cand_nif = client_nif_matches[0][0].replace('-', '').upper()
+                if cand_nif in nif_to_company:
+                    out['nombre_cliente'] = nif_to_company[cand_nif]
+        except Exception:
+            pass
+        if not nc_val:
+            # find blocks with 'cliente' or 'destinatario'
+            for i, ln in enumerate(lines):
+                if re.search(r'cliente|destinatario', ln, re.IGNORECASE):
+                    # take following line as client name if exists
+                    if i+1 < len(lines):
+                        cand = lines[i+1]
+                        if cand != out.get('nombre_proveedor'):
+                            nc_val = cand
+                            break
+        out['nombre_cliente'] = nc_val
+
+        # 3. cp_cliente: extract 5-digit postal code from client block
+        cp = out.get('cp_cliente')
+        if cp:
+            # sanitize
+            cp = re.sub(r'[^0-9]', '', str(cp))
+        else:
+            # search for postal codes in same paragraph as client name
+            client_block = out.get('nombre_cliente') or ''
+            if client_block:
+                # find lines containing client_block
+                matches = [ln for ln in lines if client_block in ln]
+                if matches:
+                    idx = lines.index(matches[0])
+                    # search nearby lines for 5-digit
+                    window = lines[max(0, idx-2): idx+3]
+                    for ln in window:
+                        m = re.search(r'\b(\d{5})\b', ln)
+                        if m:
+                            cp = m.group(1)
+                            break
+        # Additional rule: ensure cp_cliente comes from client block, not provider header
+        # If cp was found but it's in the top header near provider, and there is a distinct client block containing a different postal code, prefer client one.
+        if cp:
+            # check if cp appears in provider area (first 6 lines)
+            provider_area = '\n'.join(lines[:6])
+            if re.search(r'\b' + re.escape(str(cp)) + r'\b', provider_area):
+                # try to find other postal codes in document and prefer ones near client name
+                client_block = nc_val or ''
+                if client_block:
+                    matches = [ln for ln in lines if client_block in ln]
+                    if matches:
+                        idx = lines.index(matches[0])
+                        window = lines[max(0, idx-3): idx+4]
+                        for ln in window:
+                            m2 = re.search(r'\b(\d{5})\b', ln)
+                            if m2 and m2.group(1) != cp:
+                                cp = m2.group(1)
+                                break
+        out['cp_cliente'] = cp
+
+        # 4. nif_cliente: clean OCR typical confusions only if result fits fiscal pattern
+        def valid_nif(n):
+            if not n: return False
+            s = re.sub(r'[^A-Za-z0-9]', '', n)
+            # patterns: 8 digits + letter OR letter + 7 digits + letter
+            if re.match(r'^\d{8}[A-Za-z]$', s):
+                return True
+            if re.match(r'^[A-Za-z]\d{7}[A-Za-z0-9]$', s):
+                return True
+            return False
+
+        def try_fix_nif(n):
+            if not n: return n
+            cand = re.sub(r'\s+', '', n)
+            # try replacements
+            variants = set()
+            variants.add(cand)
+            trans_map = [('O','0'), ('o','0'), ('S','5'), ('s','5'), ('B','8'), ('I','1')]
+            # generate simple single-pass replacement variants
+            for a,b in trans_map:
+                variants.add(cand.replace(a,b))
+            # try combinations up to two replacements
+            for a,b in trans_map:
+                for c,d in trans_map:
+                    variants.add(cand.replace(a,b).replace(c,d))
+            for v in variants:
+                if valid_nif(v):
+                    return v
+            return n
+
+        nc_nif = out.get('nif_cliente')
+        # If there is a client NIF near 'Numero NIF' label, prefer it (and try to fix OCR errors)
+        if client_nif_matches:
+            val, idx, ln = client_nif_matches[0]
+            candidate = val
+            fixed = try_fix_nif(candidate)
+            if valid_nif(fixed):
+                out['nif_cliente'] = fixed
+                # also set nombre_cliente based on nearby company line if available
+                for j in range(idx-2, idx+3):
+                    if j<0 or j>=len(lines):
+                        continue
+                    s = lines[j]
+                    if len(re.sub(r'[^A-Za-z0-9]', '', s)) < 4:
+                        continue
+                    if re.search(r'\bS\.L\.|\bS\.A\.|\bS\.L\.U\b', s, re.IGNORECASE) or sum(1 for w in re.findall(r"[A-Za-z]+", s) if w.isupper())>=1:
+                        out['nombre_cliente'] = s
+                        break
+        elif nc_nif and not valid_nif(nc_nif):
+            fixed = try_fix_nif(nc_nif)
+            if valid_nif(fixed):
+                out['nif_cliente'] = fixed
+
+        # 5. numero_factura: prefer fiscal invoice number, avoid ticket/caja
+        nf = out.get('numero_factura')
+        # search OCR for invoice-like patterns
+        found = None
+        # common invoice patterns
+        for ln in lines:
+            m = re.search(r'factura(?:\s*n[oº]?\s*[:\-]?)?\s*([A-Za-z0-9\-\/]+)', ln, re.IGNORECASE)
+            if m:
+                found = m.group(1)
+                break
+        if not found:
+            # search for 'Número Factura' variants
+            for ln in lines:
+                m = re.search(r'numero[:\s]*([A-Za-z0-9\-\/]+)', ln, re.IGNORECASE)
+                if m and not re.search(r'ticket|caja|nfs|operaci', ln, re.IGNORECASE):
+                    found = m.group(1)
+                    break
+        # validate candidate: reject if contains 'ticket' or 'caja' or is short ambiguous
+        # Reject ticket/caja identifiers as invoice number
+        if found and re.search(r'ticket|caja|nfs|operaci', found, re.IGNORECASE):
+            found = None
+        if found:
+            nf = found
+        else:
+            # if existing nf contains 'ticket' or 'caja', clear it
+            if nf and re.search(r'ticket|caja|nfs|operaci', str(nf), re.IGNORECASE):
+                nf = None
+            # Additional strict rule: if no clear 'factura' identifier, set to None
+            if not nf:
+                nf = None
+        out['numero_factura'] = nf
+
+        # 6. subtotal, iva, total: search final coherent block
+        subtotal = out.get('subtotal')
+        iva = out.get('iva')
+        total = out.get('total')
+        # find numeric amounts in footer area (last 10 lines)
+        footer = lines[-12:]
+        nums = {}
+        for ln in footer[::-1]:
+            m_total = re.search(r'\btotal\b[^0-9\-\,\.]*([0-9\.,]+)', ln, re.IGNORECASE)
+            m_iva = re.search(r'\biva\b[^0-9\-\,\.]*([0-9\.,]+)', ln, re.IGNORECASE)
+            m_sub = re.search(r'\bsub(total)?\b[^0-9\-\,\.]*([0-9\.,]+)', ln, re.IGNORECASE)
+            if m_total and 'total' not in nums:
+                nums['total'] = float(m_total.group(1).replace('.','').replace(',','.'))
+            if m_iva and 'iva' not in nums:
+                nums['iva'] = float(m_iva.group(1).replace('.','').replace(',','.'))
+            if m_sub and 'subtotal' not in nums:
+                # group may be in group(2)
+                g = m_sub.group(2) if m_sub.groups() else m_sub.group(1)
+                nums['subtotal'] = float(g.replace('.','').replace(',','.'))
+        # if coherent triplet, accept
+        if 'total' in nums and 'iva' in nums and 'subtotal' in nums:
+            if abs((nums['subtotal'] + nums['iva']) - nums['total']) <= 0.05:
+                out['subtotal'] = nums['subtotal']
+                out['iva'] = nums['iva']
+                out['total'] = nums['total']
+
+        # 7. tipo_documento: normalize to enum lowercase
+        td = out.get('tipo_documento')
+        if isinstance(td, str):
+            td_low = td.strip().lower()
+            if 'ticket' in td_low:
+                out['tipo_documento'] = 'ticket'
+            elif 'factura' in td_low:
+                out['tipo_documento'] = 'factura'
+            elif 'no fiscal' in td_low or 'no_fiscal' in td_low:
+                out['tipo_documento'] = 'no_fiscal'
+            else:
+                out['tipo_documento'] = 'desconocido'
+
+        return out

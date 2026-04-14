@@ -1,0 +1,14 @@
+{
+  "nombre_proveedor": "SUM DE OFICINA BENIOFFI SL",
+  "nif_proveedor": "B-84406289",
+  "nombre_cliente": "BRICOLAJE BRICOMAN S.L.U",
+  "nif_cliente": "B53711495",
+  "cp_cliente": "03506",
+  "numero_factura": "029-000006-004-2014",
+  "subtotal": null,
+  "iva": null,
+  "total": null,
+  "tipo_documento": "factura",
+  "pdf_path": "data/inbox/029-0004-931472(c).pdf",
+  "raw_model_output": "<omitted long RAW message.content for brevity>"
+}
