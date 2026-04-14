@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 
 from config.settings import get_settings
@@ -36,6 +37,13 @@ class ScanSummary:
 
 
 class InvoiceScanner:
+    TRACE_FILE_NAMES = {
+        "factura-00074.pdf",
+        "factura-00116.pdf",
+        "factura-00127.pdf",
+        "factura-00130.pdf",
+    }
+
     NON_FISCAL_FOLDER_HINTS = {
         "tgss",
         "seguridad social",
@@ -121,6 +129,33 @@ class InvoiceScanner:
             path = Path.cwd() / path
 
         return path.resolve()
+
+    def _append_agus_runtime_trace(self, pdf_path: Path, parsed) -> None:
+        if parsed.parser_usado != "agus":
+            return
+
+        if pdf_path.name not in self.TRACE_FILE_NAMES:
+            return
+
+        trace_path = self.settings.data_dir / "agus_runtime_trace.log"
+        payload = {
+            "archivo": pdf_path.name,
+            "ruta_archivo": str(pdf_path.resolve()),
+            "parser_usado": parsed.parser_usado,
+            "agus_module_file": parsed.metadatos.get("agus_trace_module_file", ""),
+            "agus_module_mtime_ns": parsed.metadatos.get("agus_trace_module_mtime_ns", ""),
+            "agus_module_sha256": parsed.metadatos.get("agus_trace_module_sha256", ""),
+            "agus_is_clinica_layout": parsed.metadatos.get("agus_trace_is_clinica_layout", ""),
+            "agus_raw_customer_tax_id": parsed.metadatos.get("agus_trace_raw_customer_tax_id", ""),
+            "agus_raw_customer_postal_code": parsed.metadatos.get("agus_trace_raw_customer_postal_code", ""),
+            "agus_parser_return_nif_cliente": parsed.metadatos.get("agus_trace_parser_return_nif_cliente", ""),
+            "agus_parser_return_cp_cliente": parsed.metadatos.get("agus_trace_parser_return_cp_cliente", ""),
+            "scanner_post_finalize_nif_cliente": parsed.nif_cliente or "",
+            "scanner_post_finalize_cp_cliente": parsed.cp_cliente or "",
+        }
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        with trace_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
     def _build_folder_origin(self, pdf_path: Path, scan_dir: Path) -> str | None:
         try:
@@ -404,6 +439,7 @@ class InvoiceScanner:
         )
         parser = resolution.selected_parser
         parsed = parser.parse(read_result.text, pdf_path).finalize()
+        self._append_agus_runtime_trace(pdf_path, parsed)
         document_type = self._infer_document_type_from_parser(
             parser_name=parsed.parser_usado,
             pdf_path=pdf_path,
