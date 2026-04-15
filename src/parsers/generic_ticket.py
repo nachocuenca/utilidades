@@ -103,13 +103,14 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
             if marker in normalized_text:
                 return False
 
-        # If the path suggests a ticket, require stronger signals before accepting
-        if path_suggests_ticket and not (has_total and has_date and strong_matches >= 1):
+        # If the path suggests a ticket, require at least one clear ticket signal
+        if path_suggests_ticket and not (has_total or has_date or strong_matches >= 1 or support_matches >= 1):
             return False
 
+        # Relaxed acceptance: one strong match is enough, or support+date/total
         if not (
-            strong_matches >= 2
-            or (strong_matches >= 1 and support_matches >= 1 and has_total and has_date)
+            strong_matches >= 1
+            or (support_matches >= 1 and (has_total or has_date))
         ):
             return False
 

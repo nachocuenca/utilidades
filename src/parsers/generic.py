@@ -34,7 +34,7 @@ class GenericInvoiceParser(BaseInvoiceParser):
         if self.looks_like_ticket_document(text, file_path):
             return False
 
-        # Count evidences: require at least two strong signals to accept
+        # Count evidences: allow fallback with a single reasonable evidence
         evidences = 0
         if self.looks_like_invoice_document(text):
             evidences += 1
@@ -47,7 +47,8 @@ class GenericInvoiceParser(BaseInvoiceParser):
         if self.extract_supplier_tax_id(text) is not None:
             evidences += 1
 
-        return evidences >= 2
+        # Relaxed: accept if at least one reasonable evidence exists
+        return evidences >= 1
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         lines = self.extract_lines(text)

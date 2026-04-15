@@ -153,9 +153,8 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
             return False
 
         profile = self.detect_profile(text, file_path)
-        # If profile is generic, do not claim it
-        if profile == "generic":
-            return False
+        # Do not automatically reject a generic profile if strong non-fiscal
+        # evidence is present; keep rejecting clear invoices above.
 
         normalized_text = (text or "").lower()
 

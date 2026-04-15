@@ -101,11 +101,6 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
         has_reliable_amounts = self.has_reliable_amount_evidence(text)
         alias = self._alias_from_file_path(file_path) is not None
 
-        # Require at least some fiscal structure beyond a lone date/total
-        # This blocks noisy documents that only contain a date and a single total line.
-        if not (has_supplier_tax_id or has_reliable_amounts or invoice_hits >= 2):
-            return False
-
         # Strong evidences
         strong = 0
         if has_supplier_tax_id:
@@ -128,10 +123,10 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
 
         total_evidences = strong + supplemental
 
-        # Require at least one strong evidence and total evidences >= 2
-        if strong >= 1 and total_evidences >= 2:
-            # Prevent folder alias being sole deciding factor
-            if alias and not (strong >= 1 and (supplemental >= 1 or strong >= 2)):
+        # Relaxed: accept when total evidences >= 1, but avoid alias-only decisions
+        if total_evidences >= 1:
+            # Prevent folder alias being the sole deciding factor
+            if alias and strong == 0 and supplemental == 1:
                 return False
             return True
 
