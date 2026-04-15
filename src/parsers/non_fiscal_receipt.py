@@ -148,7 +148,49 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
     }
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
-        return True
+        # Be conservative: do not accept documents that look like invoices
+        if self.looks_like_invoice_document(text):
+            return False
+
+        profile = self.detect_profile(text, file_path)
+        # If profile is generic, do not claim it
+        if profile == "generic":
+            return False
+
+        normalized_text = (text or "").lower()
+
+        # Strong markers for non-fiscal receipts
+        strong_markers = (
+            "iban",
+            "adeudo recibido",
+            "cargo en cuenta",
+            "domiciliacion bancaria",
+            "titular de la domiciliacion",
+            "tgss",
+            "fempa",
+        )
+
+        # Supplementary (weaker) markers
+        supplemental_markers = (
+            "recibo",
+            "titular",
+            "adeudo",
+            "domiciliacion",
+        )
+
+        strong_found = 0
+        for marker in strong_markers:
+            if marker in normalized_text:
+                strong_found += 1
+
+        # IBAN pattern detection (explicit)
+        if IBAN_PATTERN.search(text or ""):
+            strong_found += 1
+
+        supplemental_found = sum(1 for m in supplemental_markers if m in normalized_text)
+
+        # Accept only if at least one strong marker OR two supplementary markers
+        return strong_found >= 1 or supplemental_found >= 2
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         lines = self.extract_lines(text)

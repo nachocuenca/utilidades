@@ -1,8 +1,27 @@
 from __future__ import annotations
 
+from src.parsers.generic import GenericInvoiceParser
+
+
+def test_non_fiscal_text_not_handled():
+    text = (
+        "ADEUDO RECIBIDO\n" "Titular de la domiciliacion: Juan Perez\n" "IBAN ES84 1465 0100 9417 6430 4696\n"
+    )
+    parser = GenericInvoiceParser()
+    assert not parser.can_handle(text, None)
+
+
+def test_simple_invoice_handled():
+    text = (
+        "Factura No: 12345\n"
+        "Fecha: 12/04/2026\n"
+        "Proveedor: ACME SL\n"
+        "Total factura: 100,00\n"
+    )
+    parser = GenericInvoiceParser()
+    assert parser.can_handle(text, None)
 from pathlib import Path
 
-from src.parsers.generic import GenericInvoiceParser
 from src.parsers.generic_supplier import GenericSupplierInvoiceParser
 from src.parsers.generic_ticket import GenericTicketInvoiceParser
 
