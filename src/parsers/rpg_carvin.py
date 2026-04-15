@@ -9,6 +9,11 @@ class RpgCarvinInvoiceParser(BaseInvoiceParser):
     priority = 360
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
+        # Prioritize explicit tax id and full supplier name
+        if self._can_handle_by_supplier(text, supplier_name="RPG CARVIN, S.L.", supplier_tax_id="B53984076", file_path=file_path):
+            return True
+
+        # Fallback legacy checks
         return "RPG CARVIN, S.L." in text or "B53984076" in text
 
     def parse(self, text: str, file_path: str | Path) -> "ParsedInvoiceData":

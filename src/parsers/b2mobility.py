@@ -9,6 +9,11 @@ class B2MobilityInvoiceParser(BaseInvoiceParser):
     priority = 380
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
+        # Prioritize explicit tax id and full supplier name
+        if self._can_handle_by_supplier(text, supplier_name="B2Mobility GmbH", supplier_tax_id="N2765289J", file_path=file_path):
+            return True
+
+        # Fallback legacy checks
         return "B2Mobility GmbH" in text or "N2765289J" in text
 
     def parse(self, text: str, file_path: str | Path) -> "ParsedInvoiceData":

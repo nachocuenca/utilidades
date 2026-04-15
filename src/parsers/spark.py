@@ -8,8 +8,13 @@ class SparkInvoiceParser(BaseInvoiceParser):
     priority = 20
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
-        # Detecta por nombre proveedor o patrón claro de Spark
-        return "SPARK" in text.upper() or "SPARK ENERGIA" in text.upper()
+        # Prioritize explicit tax id or full supplier name when available
+        if self._can_handle_by_supplier(text, supplier_name="SPARK ENERGIA SL", supplier_tax_id=None, file_path=file_path):
+            return True
+
+        # Detecta por nombre proveedor o patrón claro de Spark (fallback)
+        normalized = self._normalize_lookup_text(text)
+        return "spark energia" in normalized
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         lines = self.extract_lines(text)

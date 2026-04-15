@@ -15,6 +15,10 @@ class BeroilInvoiceParser(BaseInvoiceParser):
         return value
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
+        # Prioritize explicit tax id and full supplier name
+        if self._can_handle_by_supplier(text, supplier_name="BEROIL, S.L.U", supplier_tax_id="B09417957", file_path=file_path):
+            return True
+
         # Detecta patrón claro de BEROIL
         return "BEROIL, S.L.U" in text or "B09417957" in text
 

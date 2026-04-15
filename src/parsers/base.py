@@ -205,6 +205,74 @@ class BaseInvoiceParser(ABC):
         parent_name = re.sub(r"\s+", " ", parent_name).strip()
         return clean_name_candidate(parent_name)
 
+    def _normalize_lookup_text(self, value: str | None) -> str:
+        if not value:
+            return ""
+
+        import unicodedata
+
+        normalized = unicodedata.normalize("NFKD", value)
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        normalized = normalized.lower()
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _compact_lookup_text(self, value: str | None) -> str:
+        return self._normalize_lookup_text(value).replace(" ", "")
+
+    def _can_handle_by_supplier(
+        self,
+        text: str,
+        *,
+        supplier_name: str | None = None,
+        supplier_tax_id: str | None = None,
+        file_path: str | Path | None = None,
+    ) -> bool:
+        """Strict supplier identity check.
+
+        Rules:
+        - Return True ONLY if the supplier tax id matches exactly OR the full
+          supplier name (normalized) matches exactly as a contiguous token
+          sequence in the normalized document text or normalized file path.
+        - Use normalized text (lowercased, accents removed, single spaces).
+        - Do NOT allow partial/substring matches.
+        """
+        normalized_text = self._normalize_lookup_text(text)
+
+        # 1) exact tax id match (normalized)
+        if supplier_tax_id:
+            try:
+                from src.utils.ids import normalize_tax_id
+
+                normalized_tax = normalize_tax_id(supplier_tax_id)
+            except Exception:
+                normalized_tax = supplier_tax_id
+
+            if normalized_tax:
+                candidates = self.extract_exact_tax_ids(text)
+                if normalized_tax in candidates:
+                    return True
+
+        # 2) exact full supplier name match in normalized text or file path
+        if supplier_name:
+            normalized_name = self._normalize_lookup_text(supplier_name)
+            if normalized_name:
+                # match as full contiguous phrase using token boundaries
+                # build a regex that ensures the phrase is not part of a larger token
+                pattern = re.compile(rf"(?<![a-z0-9]){re.escape(normalized_name)}(?![a-z0-9])")
+                if pattern.search(normalized_text):
+                    return True
+
+                # also check normalized file path hints (if provided)
+                if file_path:
+                    path_text = self.get_path_text(file_path)
+                    normalized_path = self._normalize_lookup_text(path_text)
+                    if pattern.search(normalized_path):
+                        return True
+
+        # No strong match
+        return False
+
     @staticmethod
     def clean_invoice_number_candidate(value: str | None) -> str | None:
         if value is None:

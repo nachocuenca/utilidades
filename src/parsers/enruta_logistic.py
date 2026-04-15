@@ -9,6 +9,11 @@ class EnrutaLogisticInvoiceParser(BaseInvoiceParser):
     priority = 370
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
+        # Prioritize explicit tax id and full supplier name
+        if self._can_handle_by_supplier(text, supplier_name="ENRUTA LOGISTIC LA MARINA", supplier_tax_id="B56977283", file_path=file_path):
+            return True
+
+        # Fallback legacy checks
         return "ENRUTA LOGISTIC LA MARINA" in text or "B56977283" in text
 
     def parse(self, text: str, file_path: str | Path) -> "ParsedInvoiceData":

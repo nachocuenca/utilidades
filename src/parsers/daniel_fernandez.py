@@ -10,8 +10,13 @@ class DanielFernandezInvoiceParser(BaseInvoiceParser):
     priority = 390
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
+        # Prioritize exact tax id and full supplier name matches
+        if self._can_handle_by_supplier(text, supplier_name="Daniel Fernandez Avalos", supplier_tax_id="48335522", file_path=file_path):
+            return True
+
+        # Fallback conservative check (legacy)
         t = text.lower()
-        return "daniel" in t and "fern" in t or "48335522" in t
+        return ("daniel" in t and "fern" in t) or ("48335522" in t)
 
     def parse(self, text: str, file_path: str | Path) -> "ParsedInvoiceData":
         result = self.build_result(text, file_path)
