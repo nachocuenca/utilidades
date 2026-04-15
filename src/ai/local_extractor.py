@@ -1,3 +1,5 @@
+
+from __future__ import annotations
 # Caso BEROIL, S.L.U. - parseo real IA local
 def extract_beroil_fields(ocr_text):
     """
@@ -7,7 +9,6 @@ def extract_beroil_fields(ocr_text):
     # (simulado: el resultado real se obtiene del flujo anterior)
     # Este esqueleto se debe rellenar con la integración real
     pass
-from __future__ import annotations
 
 import base64
 import io
