@@ -22,10 +22,10 @@ class RpgCarvinInvoiceParser(BaseInvoiceParser):
         if m:
             iso_date = self._normalize_rpg_date(m.group(1))
             result.fecha_factura = iso_date
-        # Total
-        m = re.search(r"\b168[,.]52\b", text)
+        # Total: busca importe tras fecha de vencimiento
+        m = re.search(r"\d{2}/\d{2}/\d{4}\s+([0-9]+[.,][0-9]{2})", text)
         if m:
-            result.total = 168.52
+            result.total = float(m.group(1).replace(",", "."))
         else:
             m = re.search(r"Total Factura\s*([0-9]+[.,][0-9]{2})", text)
             if m:
