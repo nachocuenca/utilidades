@@ -11,11 +11,11 @@ from src.ui.components import open_folder_dialog, get_common_scan_dirs, format_t
 from src.services.ai_service import AIService
 
 
-st.set_page_config(page_title="Modo IA - Extracción IA", layout="wide")
+st.set_page_config(page_title="Modo IA - Extracción IA Local", layout="wide")
 
-st.title("Modo IA — Extracción con OpenAI")
+st.title("Modo IA — Extracción con IA Local (Ollama)")
 
-service = AIService()
+service = AIService(use_local_model=True)
 
 col_left, col_right = st.columns([3, 1])
 
@@ -61,7 +61,7 @@ with col_left:
     st.markdown(f"**Archivos detectados:** {len(files_to_process)}")
 
     if files_to_process:
-        if st.button("Procesar con IA"):
+        if st.button("Procesar con IA local (Ollama)"):
             st.session_state["ia_results"] = []
             with st.spinner("Procesando con OpenAI, esto puede tardar..."):
                 for f in files_to_process:
@@ -73,7 +73,7 @@ with col_left:
 
 with col_right:
     st.header("Acciones rápidas")
-    st.caption("Configuración: usa variables OPENAI_API_KEY y OPENAI_MODEL")
+    st.markdown("---")
     st.markdown("---")
     st.write("Puedes procesar un PDF individual o una carpeta entera.")
 
@@ -135,7 +135,7 @@ else:
 
         # Actions: save / skip
         save_col, skip_col = st.columns([1, 1])
-        with save_col:
+            st.write("Guardado en BD deshabilitado en Modo IA local.")
             if st.button(f"Guardar resultados en BD — {Path(item.get('path')).name}"):
                 # decide requiere_revision_manual by is_valid (validator logic)
                 requiere = not is_valid

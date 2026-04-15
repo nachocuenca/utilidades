@@ -1,2 +1,0 @@
-Proveedor,NIF_Proveedor,Cliente,NIF_Cliente,CP_Cliente,Numero_Factura,Subtotal,IVA,Total,Tipo_Documento,Raw_JSON,PDF_Path
-"SUM DE OFICINA BENIOFFI SL","B84406289","BRICOLAJE BRICOMAN S.L.U","B53711495","03506","029-000006-004-2014","","","","factura","{\"nombre_proveedor\": \"SUM DE OFICINA BENIOFFI SL\", \"nif_proveedor\": \"B-84406289\", \"nombre_cliente\": \"BRICOLAJE BRICOMAN S.L.U\", \"nif_cliente\": \"B53711495\", \"cp_cliente\": \"03506\"}","data/inbox/029-0004-931472(c).pdf"
