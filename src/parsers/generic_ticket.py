@@ -75,10 +75,12 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
     priority = 60
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
-        path_text = self.get_path_text(file_path)
-
-        if any(ticket_path in path_text for ticket_path in ["/tickets/", "/ticket/"]):
-            return True
+        path_text = self.get_path_text(file_path) or ""
+        path_text_lower = path_text.lower()
+        # Detect common ticket folder hints (support both slashes and backslashes)
+        path_suggests_ticket = any(
+            p in path_text_lower for p in ("/tickets/", "/ticket/", "\\tickets\\", "\\ticket\\")
+        )
 
         lines = self.extract_lines(text)
         if len(lines) > 60:
@@ -88,6 +90,22 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         support_matches = sum(1 for pattern in SUPPORT_TICKET_PATTERNS if pattern.search(text))
         has_total = bool(TOTAL_LINE_PATTERN.search(text))
         has_date = bool(DATE_PATTERN.search(text))
+
+        # Explicit reject if clear fiscal invoice markers are present
+        normalized_text = text.lower()
+        for marker in [
+            "base imponible",
+            "cuota iva",
+            "importe iva",
+            "total factura",
+            "subtotal",
+        ]:
+            if marker in normalized_text:
+                return False
+
+        # If the path suggests a ticket, require stronger signals before accepting
+        if path_suggests_ticket and not (has_total and has_date and strong_matches >= 1):
+            return False
 
         if not (
             strong_matches >= 2
