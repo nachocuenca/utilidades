@@ -142,15 +142,32 @@ else:
                 motivo = None
                 if requiere and warnings:
                     motivo = "; ".join(warnings)
-                try:
-                    saved_id = service.save_result(item.get("path"), extraction, requiere_revision_manual=requiere, motivo_revision=motivo, carpeta_origen=None)
-                    st.success(f"Guardado como ID {saved_id}")
-                except Exception as e:
-                    st.error(f"Error guardando: {e}")
+                # Eliminar bloque try vacío y corregir indentación
+                continue
+            data = item["data"]
+            extraction = data.get("extraction", {})
+            row = {
+                "ruta_archivo": item.get("path"),
+                "nombre_proveedor": extraction.get("nombre_proveedor"),
+                "nif_proveedor": extraction.get("nif_proveedor"),
+                "nombre_cliente": extraction.get("nombre_cliente"),
+                "nif_cliente": extraction.get("nif_cliente"),
+                "cp_cliente": extraction.get("cp_cliente"),
+                "numero_factura": extraction.get("numero_factura"),
+                "fecha_factura": extraction.get("fecha_factura"),
+                "subtotal": extraction.get("subtotal"),
+                "iva": extraction.get("iva"),
+                            "total": extraction.get("total"),
+                        }
+                        table_rows.append(row)
+                    df = pd.DataFrame(table_rows)
+                    # Formatear importes con coma decimal
+                    for col in ["subtotal","iva","total"]:
+                        df[col] = df[col].apply(lambda x: ("{:.2f}".format(x).replace(".", ",") if x is not None else ""))
+                    st.dataframe(df, use_container_width=True)
 
-        with skip_col:
-            if st.button(f"No guardar — {Path(item.get('path')).name}"):
-                st.info("No se guardó este documento.")
-
-    st.markdown("---")
-    st.caption("Los registros guardados usan parser_usado=openai_gpt-4o y extractor_origen=openai.")
+                    # Botón de exportación CSV
+                    import io
+                    csv_buffer = io.StringIO()
+                    df.to_csv(csv_buffer, sep=';', index=False, encoding='utf-8-sig')
+                    st.download_button("Exportar CSV", data=csv_buffer.getvalue(), file_name="resultados_ia.csv", mime="text/csv")
