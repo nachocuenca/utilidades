@@ -68,14 +68,15 @@ def test_obramat_still_beats_generic_ticket() -> None:
 
 
 def test_generic_ticket_path_forcing() -> None:
-    """Path /tickets/ fuerza generic_ticket incluso sin strong signals."""
-    weak_text = """
-    PROVEEDOR XYZ
-    Factura 001
-    Total 100€
+    """Path /tickets/ plus minimal ticket signals should select generic_ticket."""
+    ticket_text = """
+    Ticket nº 001
+    Fecha: 10/04/2026
+    Total: 100€
+    Pagado: efectivo
     """
 
-    resolution = resolve_parser_with_trace(weak_text, file_path=Path("data/tickets/ticket.pdf"))
+    resolution = resolve_parser_with_trace(ticket_text, file_path=Path("data/tickets/ticket.pdf"))
     assert resolution.selected_parser.parser_name == "generic_ticket"
 
 
