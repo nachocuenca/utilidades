@@ -9,6 +9,7 @@ from src.db.repositories import InvoiceRepository
 from src.parsers.non_fiscal_receipt import NonFiscalReceiptParser
 from src.parsers.registry import resolve_parser_with_trace
 from src.pdf.ocr import has_meaningful_text
+from src.pdf.extract_text_with_fallback import extract_text_with_fallback
 from src.pdf.reader import read_pdf_text
 from src.utils.files import list_pdf_files
 from src.utils.hashing import sha256_file
@@ -341,10 +342,9 @@ class InvoiceScanner:
         parser_name: str | None = None,
         folder_origin: str | None = None,
     ) -> dict[str, object]:
-        read_result = read_pdf_text(pdf_path)
-
+        text = extract_text_with_fallback(pdf_path)
         text_is_meaningful = has_meaningful_text(
-            read_result.text,
+            text,
             min_text_length=self.settings.ocr_min_text_length,
         )
 
@@ -352,15 +352,11 @@ class InvoiceScanner:
         review_reason: str | None = None
 
         if not text_is_meaningful:
-            if read_result.extractor == "ocr":
-                review_reason = "OCR ejecutado, pero el texto sigue siendo insuficiente."
-            else:
-                review_reason = "PDF sin texto util. Requiere OCR o revision manual."
+            review_reason = "Texto insuficiente tras OCR. Requiere revisión manual."
 
         pre_document_type = self._infer_document_type(
-            pdf_path=pdf_path,
-            folder_origin=folder_origin,
-            text=read_result.text,
+            text,
+            pdf_path,
         )
 
         if pre_document_type == "no_fiscal":
