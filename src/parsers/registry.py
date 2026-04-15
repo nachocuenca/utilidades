@@ -25,6 +25,7 @@ from src.parsers.saltoki import SaltokiInvoiceParser
 from src.parsers.versotel import VersotelInvoiceParser
 from src.parsers.wurth import WurthInvoiceParser
 from src.parsers.spark import SparkInvoiceParser
+from src.parsers.beroil import BeroilInvoiceParser
 
 
 @dataclass(slots=True)
@@ -56,6 +57,7 @@ class ParserRegistry:
         self.register(WurthInvoiceParser())
         self.register(VersotelInvoiceParser())
         self.register(SparkInvoiceParser())
+        self.register(BeroilInvoiceParser())
 
         # Ticket genérico
         self.register(GenericTicketInvoiceParser())
