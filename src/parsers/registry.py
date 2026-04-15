@@ -58,6 +58,8 @@ class ParserRegistry:
         self.register(VersotelInvoiceParser())
         self.register(SparkInvoiceParser())
         self.register(BeroilInvoiceParser())
+        from src.parsers.rpg_carvin import RpgCarvinInvoiceParser
+        self.register(RpgCarvinInvoiceParser())
 
         # Ticket genérico
         self.register(GenericTicketInvoiceParser())
