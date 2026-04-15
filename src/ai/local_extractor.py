@@ -427,40 +427,57 @@ class LocalExtractor:
 
         # --- CASO ENRUTA ---
         if is_enruta:
-            # 1. Si aparece NIF Cliente:, ese valor tiene prioridad para nif_cliente
+            # --- CLIENTE: buscar NIF Cliente y razón social asociada ---
             cliente_nif = None
             cliente_nombre = None
             cliente_cp = None
+            cliente_lines = []
             for i, ln in enumerate(lines):
                 m = re.search(r'NIF Cliente:([A-Za-z0-9]+)', ln)
                 if m:
                     cliente_nif = m.group(1)
-                    # 2. La razón social asociada al bloque cliente debe emparejarse con ese NIF Cliente
-                    # Buscar nombre en las siguientes líneas
-                    for j in range(i+1, min(i+4, len(lines))):
+                    # Buscar razón social en las siguientes 1-4 líneas
+                    for j in range(i+1, min(i+5, len(lines))):
                         if re.search(r'S\.L|S\.A|S\.L\.U', lines[j]):
                             cliente_nombre = lines[j].strip()
                             break
-                    # 4. 03530 LA NUCIA debe asignarse al mismo bloque que el cliente cuando esté claro
-                    for j in range(i+1, min(i+6, len(lines))):
-                        mcp = re.search(r'(\d{5})', lines[j])
+                    # Buscar CP en bloque cercano (de NIF Cliente a 6 líneas después)
+                    cp_candidates = []
+                    for k in range(i, min(i+7, len(lines))):
+                        mcp = re.search(r'(\d{5})', lines[k])
                         if mcp:
-                            cliente_cp = mcp.group(1)
+                            cp_candidates.append((lines[k], mcp.group(1)))
+                    # Prioriza CP que esté en línea con 'NUCIA'
+                    cp_final = None
+                    for ltxt, cpval in cp_candidates:
+                        if 'NUCIA' in ltxt.upper():
+                            cp_final = cpval
                             break
+                    if not cp_final and cp_candidates:
+                        cp_final = cp_candidates[0][1]
+                    cliente_cp = cp_final
+                    # Guardar líneas usadas para depuración
+                    cliente_lines = lines[i:min(i+7, len(lines))]
                     break
-            out['nif_cliente'] = cliente_nif
-            out['nombre_cliente'] = cliente_nombre
-            out['cp_cliente'] = cliente_cp
-            # 3. Si un bloque contiene B53711495 junto a SUMINISTROS DE OFICINA BENIOFFI S.L., trátalo como proveedor
+            # --- PROVEEDOR: buscar bloque con B53711495 y Benioffi ---
             proveedor_nombre = None
             proveedor_nif = None
-            for ln in lines:
+            proveedor_lines = []
+            for i, ln in enumerate(lines):
                 if 'B53711495' in ln and 'BENIOFFI' in ln.upper():
                     proveedor_nombre = 'SUMINISTROS DE OFICINA BENIOFFI S.L.'
                     proveedor_nif = 'B53711495'
+                    proveedor_lines = [ln]
                     break
+            # Asignar proveedor y cliente
             out['nombre_proveedor'] = proveedor_nombre
             out['nif_proveedor'] = proveedor_nif
+            out['nombre_cliente'] = cliente_nombre
+            out['nif_cliente'] = cliente_nif
+            out['cp_cliente'] = cliente_cp
+            # Depuración: mostrar líneas usadas para proveedor y cliente
+            print('DEBUG: líneas usadas para proveedor:', proveedor_lines)
+            print('DEBUG: líneas usadas para cliente:', cliente_lines)
 
         # ...existing code for the rest of the function...
         # (mantener el resto del postproceso original)
