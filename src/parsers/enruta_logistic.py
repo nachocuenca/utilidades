@@ -17,9 +17,11 @@ class EnrutaLogisticInvoiceParser(BaseInvoiceParser):
         if m:
             result.numero_factura = m.group(1)
         # Fecha
+        iso_date = None
         m = re.search(r"Fecha\s*[:]?\s*([0-9]{2}/[0-9]{2}/[0-9]{2,4})", text)
         if m:
-            result.fecha_factura = self._normalize_enruta_date(m.group(1))
+            iso_date = self._normalize_enruta_date(m.group(1))
+            result.fecha_factura = iso_date
         # Total
         m = re.search(r"Total factura\s*([0-9]+[.,][0-9]{2})", text, re.IGNORECASE)
         if m:
@@ -29,7 +31,10 @@ class EnrutaLogisticInvoiceParser(BaseInvoiceParser):
             m = re.search(r"([0-9]+[.,][0-9]{2})\s*€", text)
             if m:
                 result.total = float(m.group(1).replace(",", "."))
-        return result.finalize()
+        finalized = result.finalize()
+        if iso_date:
+            finalized.fecha_factura = iso_date
+        return finalized
 
     def _normalize_enruta_date(self, value: str) -> str:
         m = re.match(r"(\d{2})/(\d{2})/(\d{2,4})", value)
