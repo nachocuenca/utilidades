@@ -237,9 +237,11 @@ class BaseInvoiceParser(ABC):
         - Use normalized text (lowercased, accents removed, single spaces).
         - Do NOT allow partial/substring matches.
         """
+        # Normalize document text once
         normalized_text = self._normalize_lookup_text(text)
 
-        # 1) exact tax id match (normalized)
+        # 1) STRONG MATCH in TEXT only: exact tax id OR full normalized supplier name
+        # Check exact tax id in the document (using extractor to ensure exactness)
         if supplier_tax_id:
             try:
                 from src.utils.ids import normalize_tax_id
@@ -253,24 +255,34 @@ class BaseInvoiceParser(ABC):
                 if normalized_tax in candidates:
                     return True
 
-        # 2) exact full supplier name match in normalized text or file path
+        # Check full supplier name as a contiguous normalized phrase in document text
         if supplier_name:
             normalized_name = self._normalize_lookup_text(supplier_name)
             if normalized_name:
-                # match as full contiguous phrase using token boundaries
-                # build a regex that ensures the phrase is not part of a larger token
+                # ensure we match the full phrase, not substrings of tokens
                 pattern = re.compile(rf"(?<![a-z0-9]){re.escape(normalized_name)}(?![a-z0-9])")
                 if pattern.search(normalized_text):
                     return True
 
-                # also check normalized file path hints (if provided)
-                if file_path:
-                    path_text = self.get_path_text(file_path)
-                    normalized_path = self._normalize_lookup_text(path_text)
-                    if pattern.search(normalized_path):
-                        return True
+        # 2) FALLBACK CONTROLLED: only if no strong text match above
+        # allow matches in file path using compacted name (no spaces) or tax id in filename
+        if file_path:
+            path_text = self.get_path_text(file_path)
+            normalized_path = self._normalize_lookup_text(path_text)
 
-        # No strong match
+            # tax id in filename (compact form)
+            if supplier_tax_id:
+                compact_tax = supplier_tax_id.replace(" ", "")
+                if compact_tax and compact_tax.lower() in path_text:
+                    return True
+
+            # compact name (no spaces) in path
+            if supplier_name:
+                compact_name = normalized_name.replace(" ", "") if supplier_name else ""
+                if compact_name and compact_name in normalized_path.replace(" ", ""):
+                    return True
+
+        # PROHIBITED: partial matches or generic contains are not allowed
         return False
 
     @staticmethod
