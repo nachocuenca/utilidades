@@ -40,23 +40,11 @@ class LocalExtractor:
         pass
 
     def extract_from_pdf(self, pdf_path: str | Path, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        # Coincidencia determinista exacta para el PDF Factura_26D013477-00110790- (1 de 2).PDF
-        return {
-            "tipo_documento": "factura",
-            "nombre_proveedor": "BEROIL, S.L.U.",
-            "nif_proveedor": "B09417957",
-            "nombre_cliente": "Suministros de Oficina Benioffi, S.L.",
-            "nif_cliente": "B53711495",
-            "cp_cliente": 3530,
-            "numero_factura": "26D013477",
-            "fecha_factura": "2026-03-31",
-            "subtotal": 60.33,
-            "iva": 9.67,
-            "total": 70.0,
-            "confidence": 1.0,
-            "warnings": [],
-            "evidence_snippets": ["FORZADO 100% DETERMINISTA"],
-        }
+        settings = get_settings()
+        # Extracción real: OCR + llamada Ollama + postproceso
+        extraction = self._extract_with_ollama(pdf_path, settings)
+        post = self._postprocess_extraction(extraction, read_pdf_text_only(pdf_path), [])
+        return post
 
     def _render_pdf_pages_to_base64(self, pdf_path: str | Path, dpi: int = 200, max_pages: Optional[int] = 4) -> List[str]:
         """Render first pages of PDF into base64-encoded PNG images using pypdfium2.

@@ -135,39 +135,5 @@ else:
 
         # Actions: save / skip
         save_col, skip_col = st.columns([1, 1])
+        with save_col:
             st.write("Guardado en BD deshabilitado en Modo IA local.")
-            if st.button(f"Guardar resultados en BD — {Path(item.get('path')).name}"):
-                # decide requiere_revision_manual by is_valid (validator logic)
-                requiere = not is_valid
-                motivo = None
-                if requiere and warnings:
-                    motivo = "; ".join(warnings)
-                # Eliminar bloque try vacío y corregir indentación
-                continue
-            data = item["data"]
-            extraction = data.get("extraction", {})
-            row = {
-                "ruta_archivo": item.get("path"),
-                "nombre_proveedor": extraction.get("nombre_proveedor"),
-                "nif_proveedor": extraction.get("nif_proveedor"),
-                "nombre_cliente": extraction.get("nombre_cliente"),
-                "nif_cliente": extraction.get("nif_cliente"),
-                "cp_cliente": extraction.get("cp_cliente"),
-                "numero_factura": extraction.get("numero_factura"),
-                "fecha_factura": extraction.get("fecha_factura"),
-                "subtotal": extraction.get("subtotal"),
-                "iva": extraction.get("iva"),
-                            "total": extraction.get("total"),
-                        }
-                        table_rows.append(row)
-                    df = pd.DataFrame(table_rows)
-                    # Formatear importes con coma decimal
-                    for col in ["subtotal","iva","total"]:
-                        df[col] = df[col].apply(lambda x: ("{:.2f}".format(x).replace(".", ",") if x is not None else ""))
-                    st.dataframe(df, use_container_width=True)
-
-                    # Botón de exportación CSV
-                    import io
-                    csv_buffer = io.StringIO()
-                    df.to_csv(csv_buffer, sep=';', index=False, encoding='utf-8-sig')
-                    st.download_button("Exportar CSV", data=csv_buffer.getvalue(), file_name="resultados_ia.csv", mime="text/csv")
