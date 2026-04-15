@@ -88,7 +88,7 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         if self.looks_like_ticket_document(text, file_path):
             return False
-
+        # Require invoice-like document as baseline
         if not self.looks_like_invoice_document(text):
             return False
 
@@ -99,14 +99,40 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
         has_invoice_number = self.extract_invoice_number(text) is not None
         has_date = self.extract_date(text) is not None
         has_reliable_amounts = self.has_reliable_amount_evidence(text)
+        alias = self._alias_from_file_path(file_path) is not None
 
-        if structural_hits >= 1 and (has_supplier_tax_id or has_reliable_amounts or invoice_hits >= 3):
-            return True
+        # Require at least some fiscal structure beyond a lone date/total
+        # This blocks noisy documents that only contain a date and a single total line.
+        if not (has_supplier_tax_id or has_reliable_amounts or invoice_hits >= 2):
+            return False
 
-        if has_reliable_amounts and invoice_hits >= 2 and (has_invoice_number or has_date):
-            return True
+        # Strong evidences
+        strong = 0
+        if has_supplier_tax_id:
+            strong += 1
+        if has_reliable_amounts:
+            strong += 1
+        if has_invoice_number and has_date:
+            strong += 1
 
-        if has_supplier_tax_id and has_date and invoice_hits >= 2:
+        # Supplementary evidences
+        supplemental = 0
+        if self.looks_like_invoice_document(text):
+            supplemental += 1
+        if structural_hits >= 1:
+            supplemental += 1
+        if invoice_hits >= 2:
+            supplemental += 1
+        if alias:
+            supplemental += 1
+
+        total_evidences = strong + supplemental
+
+        # Require at least one strong evidence and total evidences >= 2
+        if strong >= 1 and total_evidences >= 2:
+            # Prevent folder alias being sole deciding factor
+            if alias and not (strong >= 1 and (supplemental >= 1 or strong >= 2)):
+                return False
             return True
 
         return False
@@ -230,6 +256,11 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
             return False
 
         if customer_name and cleaned.lower() == customer_name.lower():
+            return False
+
+        # Reject probable OCR noise or too short candidates
+        compact_alnum = re.sub(r"[^A-Za-z0-9]", "", cleaned)
+        if len(compact_alnum) <= 4:
             return False
 
         return not any(pattern.search(cleaned) for pattern in SUPPLIER_NAME_BLOCK_PATTERNS)
