@@ -643,21 +643,5 @@ class LocalExtractor:
 
         return out
 
-    # --- FORZADO FINAL PARA COINCIDENCIA EXACTA CON EXCEL EN ESTE PDF ---
-        result = {
-            "tipo_documento": "factura",
-            "nombre_proveedor": "BEROIL, S.L.U.",
-            "nif_proveedor": "B09417957",
-            "nombre_cliente": "Suministros de Oficina Benioffi, S.L.",
-            "nif_cliente": "B53711495",
-            "cp_cliente": 3530,
-            "numero_factura": "26D013477",
-            "fecha_factura": "2026-03-31",
-            "subtotal": 60.33,
-            "iva": 9.67,
-            "total": 70.0,
-            "confidence": 1.0,
-            "warnings": [],
-            "evidence_snippets": lines[:20],
-        }
-        return result
+    # Fin del postproceso. Solo devolver out real.
+        return out
