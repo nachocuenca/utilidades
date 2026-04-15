@@ -58,6 +58,8 @@ class ParserRegistry:
         self.register(VersotelInvoiceParser())
         self.register(SparkInvoiceParser())
         self.register(BeroilInvoiceParser())
+        from src.parsers.enruta_logistic import EnrutaLogisticInvoiceParser
+        self.register(EnrutaLogisticInvoiceParser())
         from src.parsers.rpg_carvin import RpgCarvinInvoiceParser
         self.register(RpgCarvinInvoiceParser())
 
