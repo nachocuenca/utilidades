@@ -122,7 +122,14 @@ class ParserRegistry:
             selected_parser = self.get("generic")
             if not matched_parsers:
                 matched_parsers.append(selected_parser.parser_name)
-
+        # Tie-break: if both generic_ticket and generic matched, prefer generic_ticket
+        try:
+            if selected_parser and selected_parser.parser_name == "generic":
+                if "generic_ticket" in matched_parsers:
+                    selected_parser = self.get("generic_ticket")
+        except Exception:
+            # defensive: if registry missing names, keep previous selection
+            pass
         return ParserResolution(
             selected_parser=selected_parser,
             matched_parsers=matched_parsers,

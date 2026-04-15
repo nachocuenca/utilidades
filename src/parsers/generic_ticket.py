@@ -107,11 +107,21 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         if path_suggests_ticket and not (has_total or has_date or strong_matches >= 1 or support_matches >= 1):
             return False
 
+        # Require a date or at least a total for reliable ticket detection.
+        # Accept tickets that lack an explicit date but have a clear total.
+        if not (has_date or has_total):
+            return False
+
         # Relaxed acceptance: one strong match is enough, or support+date/total
         if not (
             strong_matches >= 1
             or (support_matches >= 1 and (has_total or has_date))
         ):
+            return False
+
+        # Reject very short or low-information texts even if they contain the word "ticket"
+        joined = "\n".join(lines).strip()
+        if len(joined) < 20:
             return False
 
         if len(NIF_PATTERN.findall(text)) > 3:
