@@ -26,6 +26,7 @@ from src.parsers.versotel import VersotelInvoiceParser
 from src.parsers.wurth import WurthInvoiceParser
 from src.parsers.spark import SparkInvoiceParser
 from src.parsers.beroil import BeroilInvoiceParser
+from src.parsers.daniel_fernandez import DanielFernandezInvoiceParser
 
 
 @dataclass(slots=True)
@@ -58,6 +59,7 @@ class ParserRegistry:
         self.register(VersotelInvoiceParser())
         self.register(SparkInvoiceParser())
         self.register(BeroilInvoiceParser())
+        self.register(DanielFernandezInvoiceParser())
         from src.parsers.enruta_logistic import EnrutaLogisticInvoiceParser
         self.register(EnrutaLogisticInvoiceParser())
         from src.parsers.rpg_carvin import RpgCarvinInvoiceParser
