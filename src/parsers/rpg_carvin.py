@@ -2,6 +2,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from src.parsers.base import BaseInvoiceParser
+from src.utils.invoice_patterns import extract_total_from_lines, normalize_date_ddmmyyyy
 
 class RpgCarvinInvoiceParser(BaseInvoiceParser):
     parser_name = "rpg_carvin"
@@ -30,6 +31,16 @@ class RpgCarvinInvoiceParser(BaseInvoiceParser):
             m = re.search(r"Total Factura\s*([0-9]+[.,][0-9]{2})", text)
             if m:
                 result.total = float(m.group(1).replace(",", "."))
+            else:
+                # Fallback: try shared total extractor
+                total = extract_total_from_lines(text)
+                if total is not None:
+                    result.total = total
+                else:
+                    # Fallback: try shared total extractor
+                    total = extract_total_from_lines(text)
+                    if total is not None:
+                        result.total = total
         finalized = result.finalize()
         if iso_date:
             finalized.fecha_factura = iso_date

@@ -2,6 +2,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from src.parsers.base import BaseInvoiceParser
+from src.utils.invoice_patterns import extract_total_from_lines, normalize_date_ddmmyyyy
 
 
 class DanielFernandezInvoiceParser(BaseInvoiceParser):
@@ -24,18 +25,13 @@ class DanielFernandezInvoiceParser(BaseInvoiceParser):
         iso_date = None
         m = re.search(r"FECHA[:\s]*([0-9]{2}/[0-9]{2}/[0-9]{2,4})", text, re.IGNORECASE)
         if m:
-            d = m.group(1)
-            # normalize dd/mm/YYYY to YYYY-MM-DD
-            parts = d.split('/')
-            if len(parts[2]) == 2:
-                parts[2] = '20' + parts[2]
-            iso_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+            iso_date = normalize_date_ddmmyyyy(m.group(1))
             result.fecha_factura = iso_date
 
         # total: buscar líneas con 'TOTAL' y tomar el último importe de esas líneas
-        totals = re.findall(r"TOTAL\s+([0-9]+[.,][0-9]{2})", text, re.IGNORECASE)
-        if totals:
-            result.total = float(totals[-1].replace(',', '.'))
+        total = extract_total_from_lines(text)
+        if total is not None:
+            result.total = total
 
         finalized = result.finalize()
         if iso_date:

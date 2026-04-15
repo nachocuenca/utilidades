@@ -2,6 +2,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from src.parsers.base import BaseInvoiceParser
+from src.utils.invoice_patterns import extract_total_from_lines, normalize_date_ddmmyyyy
 
 class B2MobilityInvoiceParser(BaseInvoiceParser):
     parser_name = "b2mobility"
@@ -20,15 +21,10 @@ class B2MobilityInvoiceParser(BaseInvoiceParser):
         iso_date = None
         m = re.search(r"FECHA\s*([0-9]{2}/[0-9]{2}/[0-9]{2,4})", text)
         if m:
-            iso_date = self._normalize_b2m_date(m.group(1))
+            iso_date = normalize_date_ddmmyyyy(m.group(1))
             result.fecha_factura = iso_date
-        # Total: busca la línea TOTAL FACTURA y toma el último importe de esa línea
-        total = None
-        for line in text.splitlines():
-            if "TOTAL FACTURA" in line:
-                nums = re.findall(r"([0-9]+[.,][0-9]{2})", line)
-                if nums:
-                    total = float(nums[-1].replace(",", "."))
+        # Total: usar utilitario común para buscar en líneas con TOTAL
+        total = extract_total_from_lines(text)
         if total is not None:
             result.total = total
         else:
@@ -42,10 +38,5 @@ class B2MobilityInvoiceParser(BaseInvoiceParser):
         return finalized
 
     def _normalize_b2m_date(self, value: str) -> str:
-        m = re.match(r"(\d{2})/(\d{2})/(\d{2,4})", value)
-        if m:
-            year = m.group(3)
-            if len(year) == 2:
-                year = "20" + year
-            return f"{year}-{m.group(2)}-{m.group(1)}"
-        return value
+        # kept for compatibility; delegate to shared normalizer
+        return normalize_date_ddmmyyyy(value)

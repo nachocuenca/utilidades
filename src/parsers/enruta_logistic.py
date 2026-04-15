@@ -1,6 +1,7 @@
 from __future__ import annotations
 import re
 from pathlib import Path
+from src.utils.invoice_patterns import extract_total_from_lines, normalize_date_ddmmyyyy
 from src.parsers.base import BaseInvoiceParser
 
 class EnrutaLogisticInvoiceParser(BaseInvoiceParser):
@@ -20,27 +21,32 @@ class EnrutaLogisticInvoiceParser(BaseInvoiceParser):
         iso_date = None
         m = re.search(r"Fecha\s*[:]?\s*([0-9]{2}/[0-9]{2}/[0-9]{2,4})", text)
         if m:
-            iso_date = self._normalize_enruta_date(m.group(1))
+            iso_date = normalize_date_ddmmyyyy(m.group(1))
             result.fecha_factura = iso_date
         # Total
-        m = re.search(r"Total factura\s*([0-9]+[.,][0-9]{2})", text, re.IGNORECASE)
+        # require amount on same line as 'Total factura' to avoid cross-line captures
+        m = re.search(r"Total factura[^\n]*?([0-9]+[.,][0-9]{2})", text, re.IGNORECASE)
         if m:
             result.total = float(m.group(1).replace(",", "."))
         else:
-            # Fallback: busca importe con símbolo euro al final de línea
-            m = re.search(r"([0-9]+[.,][0-9]{2})\s*€", text)
-            if m:
-                result.total = float(m.group(1).replace(",", "."))
+            # Fallback: intenta extraer de líneas TOTAL usando util
+            total = extract_total_from_lines(text)
+            if total is not None:
+                result.total = total
+            else:
+                # Fallback previo: busca importe con símbolo euro al final de línea
+                m = re.search(r"([0-9]+[.,][0-9]{2})\s*€", text)
+                if m:
+                    result.total = float(m.group(1).replace(",", "."))
+                else:
+                    # Último recurso: tomar el último importe encontrado en el texto
+                    matches = re.findall(r"([0-9]+[.,][0-9]{2})", text)
+                    if matches:
+                        result.total = float(matches[-1].replace(',', '.'))
         finalized = result.finalize()
         if iso_date:
             finalized.fecha_factura = iso_date
         return finalized
 
     def _normalize_enruta_date(self, value: str) -> str:
-        m = re.match(r"(\d{2})/(\d{2})/(\d{2,4})", value)
-        if m:
-            year = m.group(3)
-            if len(year) == 2:
-                year = "20" + year
-            return f"{year}-{m.group(2)}-{m.group(1)}"
-        return value
+        return normalize_date_ddmmyyyy(value)
