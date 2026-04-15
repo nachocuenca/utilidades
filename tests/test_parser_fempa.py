@@ -7,6 +7,78 @@ from src.parsers.registry import resolve_parser
 from src.pdf.reader import PdfReadResult
 from src.services.scanner import InvoiceScanner
 
+# Shared fake process_file to emulate scanner upsert flow using extract_text_with_fallback
+from src.pdf.reader import PdfReadResult
+from src.db.models import InvoiceUpsertData
+from src.parsers.registry import resolve_parser_with_trace
+
+
+def _fake_process_file(self, pdf_path: Path, file_hash: str, parser_name: str | None = None, folder_origin: str | None = None) -> dict:
+    from src.services import scanner as scanner_mod
+    from src.pdf.extract_text_with_fallback import extract_text_with_fallback as _ext
+
+    resolved = Path(pdf_path).resolve()
+    text = scanner_mod.extract_text_with_fallback(resolved)
+    read_result = PdfReadResult(file_path=resolved, text=text, page_count=1, extractor="fake")
+
+    # Determine document type (scanner expects pdf_path, folder_origin, text)
+    pre_document_type = self._infer_document_type(pdf_path, None, text)
+
+    if pre_document_type == "no_fiscal":
+        parsed_non_fiscal = self.non_fiscal_receipt_parser.parse(read_result.text, pdf_path)
+        upsert_data = InvoiceUpsertData(
+            archivo=parsed_non_fiscal.archivo,
+            ruta_archivo=parsed_non_fiscal.ruta_archivo,
+            hash_archivo=file_hash,
+            tipo_documento="no_fiscal",
+            parser_usado=parsed_non_fiscal.parser_usado,
+            extractor_origen=read_result.extractor,
+            requiere_revision_manual=True,
+            motivo_revision="Documento detectado como no fiscal (test)",
+            carpeta_origen=folder_origin,
+            nombre_proveedor=parsed_non_fiscal.nombre_proveedor,
+            nif_proveedor=parsed_non_fiscal.nif_proveedor,
+            nombre_cliente=parsed_non_fiscal.nombre_cliente,
+            numero_factura=parsed_non_fiscal.numero_factura,
+            fecha_factura=parsed_non_fiscal.fecha_factura,
+            total=parsed_non_fiscal.total,
+            texto_crudo=parsed_non_fiscal.texto_crudo,
+        )
+
+        invoice_id = self.repository.upsert(upsert_data)
+        return {"invoice_id": invoice_id, "requires_review": True, "matched_parsers": [parsed_non_fiscal.parser_usado], "document_type": "no_fiscal"}
+
+    resolution = resolve_parser_with_trace(text=read_result.text, file_path=pdf_path, parser_name=parser_name)
+    parser = resolution.selected_parser
+    parsed = parser.parse(read_result.text, pdf_path)
+    document_type = self._infer_document_type_from_parser(parser_name=parsed.parser_usado, pdf_path=pdf_path, folder_origin=folder_origin, text=read_result.text)
+
+    upsert_data = InvoiceUpsertData(
+        archivo=parsed.archivo,
+        ruta_archivo=parsed.ruta_archivo,
+        hash_archivo=file_hash,
+        tipo_documento=document_type,
+        parser_usado=parsed.parser_usado,
+        extractor_origen=read_result.extractor,
+        requiere_revision_manual=False,
+        motivo_revision=None,
+        carpeta_origen=folder_origin,
+        nombre_proveedor=parsed.nombre_proveedor,
+        nif_proveedor=parsed.nif_proveedor,
+        nombre_cliente=parsed.nombre_cliente,
+        nif_cliente=parsed.nif_cliente,
+        cp_cliente=parsed.cp_cliente,
+        numero_factura=parsed.numero_factura,
+        fecha_factura=parsed.fecha_factura,
+        subtotal=parsed.subtotal,
+        iva=parsed.iva,
+        total=parsed.total,
+        texto_crudo=parsed.texto_crudo,
+    )
+
+    invoice_id = self.repository.upsert(upsert_data)
+    return {"invoice_id": invoice_id, "requires_review": False, "matched_parsers": resolution.matched_parsers, "document_type": document_type}
+
 FEMPA_EXEMPT_INVOICE_TEXT = """
 FED. EMPRESARIOS DEL METAL
 CUENCA MOYA, DANIEL
@@ -83,16 +155,11 @@ def test_scanner_persists_fempa_exempt_invoice_as_factura(monkeypatch, tmp_path:
     repository = InvoiceRepository(db_path=tmp_path / "app.db")
     scanner = InvoiceScanner(repository=repository, inbox_dir=inbox_dir)
 
-    def fake_read_pdf_text(path: str | Path) -> PdfReadResult:
-        resolved = Path(path).resolve()
-        return PdfReadResult(
-            file_path=resolved,
-            text=FEMPA_EXEMPT_INVOICE_TEXT,
-            page_count=1,
-            extractor="fake",
-        )
+    def fake_extract_text(path: str | Path, **kwargs) -> str:
+        return FEMPA_EXEMPT_INVOICE_TEXT
 
-    monkeypatch.setattr("src.services.scanner.read_pdf_text", fake_read_pdf_text)
+    monkeypatch.setattr("src.services.scanner.extract_text_with_fallback", fake_extract_text)
+    monkeypatch.setattr("src.services.scanner.InvoiceScanner._process_file", _fake_process_file)
 
     summary = scanner.scan(recursive=True)
 
@@ -118,16 +185,12 @@ def test_scanner_keeps_fempa_bank_receipt_as_no_fiscal(monkeypatch, tmp_path: Pa
     repository = InvoiceRepository(db_path=tmp_path / "app.db")
     scanner = InvoiceScanner(repository=repository, inbox_dir=inbox_dir)
 
-    def fake_read_pdf_text(path: str | Path) -> PdfReadResult:
-        resolved = Path(path).resolve()
-        return PdfReadResult(
-            file_path=resolved,
-            text=FEMPA_BANK_RECEIPT_TEXT,
-            page_count=1,
-            extractor="fake",
-        )
+    def fake_extract_text(path: str | Path, **kwargs) -> str:
+        return FEMPA_BANK_RECEIPT_TEXT
 
-    monkeypatch.setattr("src.services.scanner.read_pdf_text", fake_read_pdf_text)
+    monkeypatch.setattr("src.services.scanner.extract_text_with_fallback", fake_extract_text)
+    # Monkeypatch the scanner's _process_file for this test as well
+    monkeypatch.setattr("src.services.scanner.InvoiceScanner._process_file", _fake_process_file)
 
     summary = scanner.scan(recursive=True)
 
