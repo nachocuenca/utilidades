@@ -24,6 +24,7 @@ from src.parsers.rhef import RhefInvoiceParser
 from src.parsers.saltoki import SaltokiInvoiceParser
 from src.parsers.versotel import VersotelInvoiceParser
 from src.parsers.wurth import WurthInvoiceParser
+from src.parsers.spark import SparkInvoiceParser
 
 
 @dataclass(slots=True)
@@ -54,6 +55,7 @@ class ParserRegistry:
         self.register(LevantiaInvoiceParser())
         self.register(WurthInvoiceParser())
         self.register(VersotelInvoiceParser())
+        self.register(SparkInvoiceParser())
 
         # Ticket genérico
         self.register(GenericTicketInvoiceParser())
