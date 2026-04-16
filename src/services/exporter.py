@@ -60,10 +60,12 @@ class InvoiceExporter:
         self,
         search: str | None = None,
         tipo_documento: str | None = None,
+        carpeta_origen: str | None = None,
     ) -> pd.DataFrame:
         rows = self.repository.list_for_export(
             search=search,
             tipo_documento=tipo_documento,
+            carpeta_origen=carpeta_origen,
         )
 
         if not rows:
@@ -81,10 +83,12 @@ class InvoiceExporter:
         self,
         search: str | None = None,
         tipo_documento: str | None = None,
+        carpeta_origen: str | None = None,
     ) -> pd.DataFrame:
         dataframe = self.build_filtered_dataframe(
             search=search,
             tipo_documento=tipo_documento,
+            carpeta_origen=carpeta_origen,
         ).copy()
 
         for column in CSV_MONETARY_COLUMNS:
@@ -114,10 +118,12 @@ class InvoiceExporter:
         self,
         search: str | None = None,
         tipo_documento: str | None = None,
+        carpeta_origen: str | None = None,
     ) -> Path:
         dataframe = self.build_csv_dataframe(
             search=search,
             tipo_documento=tipo_documento,
+            carpeta_origen=carpeta_origen,
         )
         output_path = build_export_path(
             export_dir=self.export_dir,
@@ -137,10 +143,12 @@ class InvoiceExporter:
         self,
         search: str | None = None,
         tipo_documento: str | None = None,
+        carpeta_origen: str | None = None,
     ) -> Path:
         dataframe = self.build_filtered_dataframe(
             search=search,
             tipo_documento=tipo_documento,
+            carpeta_origen=carpeta_origen,
         )
         output_path = build_export_path(
             export_dir=self.export_dir,
