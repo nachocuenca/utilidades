@@ -354,8 +354,7 @@ class InvoiceScanner:
             min_text_length=self.settings.ocr_min_text_length,
         )
 
-        # Temporary audit logging: report OCR quality
-        print(f"AUDIT: {pdf_path.name} -> text_is_meaningful={text_is_meaningful} (len={len(read_result.text or '')})")
+        # OCR quality logged internally; temporary audit prints removed
 
         requires_review = not text_is_meaningful
         review_reason: str | None = None
@@ -369,8 +368,7 @@ class InvoiceScanner:
             read_result.text,
         )
 
-        # Audit: inferred document type
-        print(f"AUDIT: {pdf_path.name} -> pre_document_type={pre_document_type}")
+        # inferred document type determined; temporary audit prints removed
 
         if pre_document_type == "no_fiscal":
             non_fiscal_reason = "Documento detectado como no fiscal (recibo bancario, TGSS o administrativo)."
@@ -414,10 +412,8 @@ class InvoiceScanner:
             parser_name=parser_name,
         )
         parser = resolution.selected_parser
-        # Audit: matched parsers
-        print(f"AUDIT: {pdf_path.name} -> matched_parsers={resolution.matched_parsers} selected={parser.parser_name}")
+        # matched parsers resolved
         parsed = parser.parse(read_result.text, pdf_path)
-        print(f"AUDIT: {pdf_path.name} -> parser_used={parsed.parser_usado} subtotal={parsed.subtotal} total={parsed.total}")
         document_type = self._infer_document_type_from_parser(
             parser_name=parsed.parser_usado,
             pdf_path=pdf_path,
@@ -425,7 +421,7 @@ class InvoiceScanner:
             text=read_result.text,
         )
 
-        print(f"AUDIT: {pdf_path.name} -> document_type_after_parser={document_type}")
+        # document type after parser resolution determined
 
         # Decide si aplicar fallback IA: solo si el parser fue genérico o faltan campos clave
         apply_ai = False

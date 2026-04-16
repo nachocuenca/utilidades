@@ -101,6 +101,8 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
         has_reliable_amounts = self.has_reliable_amount_evidence(text)
         alias = self._alias_from_file_path(file_path) is not None
 
+        noisy_present = any(candidate.lower() in normalized_text for candidate in NOISY_PROVIDER_CANDIDATES)
+
         # Strong evidences
         strong = 0
         if has_supplier_tax_id:
@@ -112,8 +114,6 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
 
         # Supplementary evidences
         supplemental = 0
-        if self.looks_like_invoice_document(text):
-            supplemental += 1
         if structural_hits >= 1:
             supplemental += 1
         if invoice_hits >= 2:
@@ -122,6 +122,12 @@ class GenericSupplierInvoiceParser(BaseInvoiceParser):
             supplemental += 1
 
         total_evidences = strong + supplemental
+
+        # If a known noisy provider token appears and we don't have either a
+        # supplier tax id or reliable amount evidence, reject to avoid false
+        # positives coming from CSV/import anomalies or OCR garbage.
+        if noisy_present and not (has_reliable_amounts or has_supplier_tax_id):
+            return False
 
         # Relaxed: accept when total evidences >= 1, but avoid alias-only decisions
         if total_evidences >= 1:
