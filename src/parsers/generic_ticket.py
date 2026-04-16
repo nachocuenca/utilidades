@@ -142,8 +142,28 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         result.numero_factura = self.extract_ticket_number(text)
         result.fecha_factura = self.extract_ticket_date_improved(text)
         result.total = self.extract_ticket_total_improved(text, lines)
-        result.subtotal = self.extract_ticket_subtotal(text)
-        result.iva = self.extract_ticket_iva(text)
+        # For tickets, avoid filling subtotal/iva by default unless explicit labels exist
+        if re.search(r"\b(subtotal|base imponible)\b", text, re.IGNORECASE):
+            result.subtotal = self.extract_ticket_subtotal(text)
+        else:
+            result.subtotal = None
+
+        if re.search(r"\b(cuota iva|importe iva|\biva\b)\b", text, re.IGNORECASE):
+            result.iva = self.extract_ticket_iva(text)
+        else:
+            result.iva = None
+
+        # Extract simple Spanish postal code (5 digits) from header lines (first ~10 lines).
+        # Ignore lines that look like they contain prices/amounts.
+        result.cp_cliente = None
+        for line in lines[:10]:
+            if re.search(r"\d+[\.,]\d{2}", line):
+                # likely a price line, skip
+                continue
+            m = re.search(r"\b(\d{5})\b", line)
+            if m:
+                result.cp_cliente = m.group(1)
+                break
 
         return result.finalize()
 
@@ -155,8 +175,8 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
             re.compile(r"(?i)(nif\s+cliente|cliente)"),
         ]
 
-        candidates: list[str] = []
-        for line in lines[:10]:
+        candidates: list[tuple[int, str, str]] = []
+        for idx, line in enumerate(lines[:10]):
             if is_ocr_basura(line):
                 continue
 
@@ -168,10 +188,50 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
                 continue
 
             if len(cleaned) >= 4 and is_valid_name_candidate(cleaned):
-                candidates.append(cleaned)
+                candidates.append((idx, cleaned, line))
 
-        best = pick_best_name(candidates)
-        if best:
+        # If a NIF appears in the first lines, prefer the candidate on the same
+        # line or the immediately previous line.
+        nif_candidates: list[tuple[int, str]] = []
+        for i, line in enumerate(lines[:10]):
+            nifs = NIF_PATTERN.findall(line)
+            for nif in nifs:
+                nif_candidates.append((i, nif))
+
+        if nif_candidates and candidates:
+            nif_index = nif_candidates[0][0]
+            # prefer candidate on same line or previous
+            for idx, cleaned, orig in candidates:
+                if idx == nif_index or idx == nif_index - 1:
+                    return cleaned
+
+        # If a line contains a person name plus a NIF (e.g. "Juan Perez / NIF: X...")
+        # prefer that person's name as supplier (more reliable than noisy commercial OCR)
+        for idx, line in enumerate(lines[:10]):
+            if NIF_PATTERN.search(line):
+                # try to extract a name-like portion before common separators
+                parts = re.split(r"[/\\\-]|NIF[:\s]*", line, flags=re.IGNORECASE)
+                if parts:
+                    candidate = clean_name_candidate(parts[0])
+                    if candidate and not is_ocr_basura(candidate):
+                        return candidate
+
+        # Heuristic: if top lines look like product/menu lines (multiple lines
+        # that start with an item count or contain prices), avoid filling
+        # proveedor unless we have NIF evidence.
+        product_like = 0
+        for line in lines[:10]:
+            if re.match(r"^\s*\d+\s+\S+", line):
+                product_like += 1
+            if re.search(r"\d+[\.,]\d{2}", line):
+                product_like += 1
+
+        if product_like >= 2 and not nif_candidates:
+            return None
+
+        # Fallback: pick best by existing heuristic
+        best = pick_best_name([c[1] for c in candidates])
+        if best and not is_ocr_basura(best):
             return best
 
         folder_hint = self.get_folder_hint_name(file_path)
@@ -185,8 +245,18 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         for index, line in enumerate(lines[:25]):
             nifs = NIF_PATTERN.findall(line)
             for nif in nifs:
+                # Skip NIFs that are clearly associated to a client line
                 if index > 0 and "cliente" in lines[index - 1].lower():
                     continue
+
+                # If the NIF appears on a line that looks like a person (e.g. "Nombre Apellido / NIF: ..."),
+                # treat it as likely a person identifier and avoid returning it as supplier tax id.
+                line_lower = line.lower()
+                if "nif" in line_lower:
+                    # heuristics: if line contains two words with letters (a personal name), skip
+                    if re.search(r"[A-Za-zÀ-ÿ]+\s+[A-Za-zÀ-ÿ]+", line):
+                        continue
+
                 nif_candidates.append((index, nif))
 
         if nif_candidates:
@@ -207,19 +277,34 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
 
     def extract_ticket_total_improved(self, text: str, lines: List[str]) -> float | None:
         for line in reversed(lines[-10:]):
-            match = TOTAL_LINE_PATTERN.search(line)
-            if match:
+            # Find all occurrences of the TOTAL_LINE_PATTERN in the line and take the last one
+            matches = list(TOTAL_LINE_PATTERN.finditer(line))
+            if matches:
+                last = matches[-1]
                 try:
-                    return float(match.group(1).replace(",", "."))
-                except ValueError:
-                    pass
+                    return float(last.group(1).replace(",", "."))
+                except (ValueError, IndexError):
+                    # fallback to scanning numbers inside the matched text
+                    numbers = re.findall(r"(\d+(?:[\.,]\d{2})?)", last.group(0))
+                    if numbers:
+                        try:
+                            return float(numbers[-1].replace(",", "."))
+                        except ValueError:
+                            pass
 
-        match = TOTAL_LINE_PATTERN.search(text)
-        if match:
+        # Fallback: find all TOTAL matches in the whole text and pick the last one
+        matches = list(TOTAL_LINE_PATTERN.finditer(text))
+        if matches:
+            last = matches[-1]
             try:
-                return float(match.group(1).replace(",", "."))
-            except ValueError:
-                pass
+                return float(last.group(1).replace(",", "."))
+            except (ValueError, IndexError):
+                numbers = re.findall(r"(\d+(?:[\.,]\d{2})?)", last.group(0))
+                if numbers:
+                    try:
+                        return float(numbers[-1].replace(",", "."))
+                    except ValueError:
+                        pass
 
         return self.extract_ticket_total(text)
 

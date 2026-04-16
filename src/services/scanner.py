@@ -285,7 +285,7 @@ class InvoiceScanner:
                     continue
 
                 existed_before = self.repository.exists_by_hash(file_hash)
-                folder_origin = self._build_folder_origin(pdf_path, scan_dir)
+                folder_origin = self._build_folder_origin(pdf_path, self.inbox_dir)
 
                 result_info = self._process_file(
                     pdf_path=pdf_path,
