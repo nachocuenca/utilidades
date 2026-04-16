@@ -27,10 +27,10 @@ TICKET_MONTHS = {
 STRONG_TICKET_PATTERNS = (
     re.compile(r"factura\s+simplificada", re.IGNORECASE),
     re.compile(r"\bsala-mesa\b", re.IGNORECASE),
-    re.compile(r"\bn[ºo]\s*op\.?\b", re.IGNORECASE),
-    re.compile(r"\bn[ºo]\s*operaci[oó]n\b", re.IGNORECASE),
+    re.compile(r"\bn[ºo°]\s*op\.?\b", re.IGNORECASE),
+    re.compile(r"\bn[ºo°]\s*operaci[oó]n\b", re.IGNORECASE),
     re.compile(r"\bticket\b", re.IGNORECASE),
-    re.compile(r"\b(n[ºo]\s*ticket|ticket n[ºo])\b", re.IGNORECASE),
+    re.compile(r"\b(n[ºo°]\s*ticket|ticket n[ºo°])\b", re.IGNORECASE),
 )
 
 SUPPORT_TICKET_PATTERNS = (
@@ -42,31 +42,29 @@ SUPPORT_TICKET_PATTERNS = (
     re.compile(r"\bpagado\b", re.IGNORECASE | re.MULTILINE),
 )
 
-# Más estricto para total en tickets
 TOTAL_LINE_PATTERN = re.compile(
-    r"(?i)(?:total|total\s*\(.*?incl|neto\s+a\s*pagar)\s*[^\n\r:]*[:\.]?\s*(\d+[.,]?\d*)",
+    r"(?i)(?:\btotal\b|neto\s+a\s*pagar)\s*[:\.]?\s*(\d+(?:[\.,]\d{2})?)",
     re.MULTILINE,
 )
 
 DATE_PATTERN = re.compile(r"\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})\b")
-
 NIF_PATTERN = re.compile(r"\b([0-9A-Z]{8,9}[A-Z])\b")
 
 OCR_BASURA_PATTERNS = [
-    re.compile(r"^\s*[A-Z\s\./]{1,8}\s*$"),  # Líneas upper cortas
+    re.compile(r"^\s*[A-Z\s\./]{1,8}\s*$"),
     re.compile(r"^[.A-Z\s]+F\.I\.N[.A-Z\s]*$", re.I),
     re.compile(r"ajoh|OILOF|otnemucod", re.I),
 ]
 
+
 def is_ocr_basura(line: str) -> bool:
-    """Detecta líneas típicas de OCR malo en tickets."""
     line_upper = line.strip().upper()
     if len(line_upper) < 4 or len(line.strip()) < 3:
         return True
     for pattern in OCR_BASURA_PATTERNS:
         if pattern.search(line):
             return True
-    vowels = sum(1 for c in line.lower() if c in 'aeiouáéíóú')
+    vowels = sum(1 for char in line.lower() if char in "aeiouáéíóú")
     if len(line) < 8 and vowels == 0:
         return True
     return False
@@ -77,35 +75,58 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
     priority = 60
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
-        path_text = self.get_path_text(file_path)
-
-        # Path tickets fuerza
-        if any(ticket_path in path_text for ticket_path in ["/tickets/", "/ticket/"]):
-            return True
+        path_text = self.get_path_text(file_path) or ""
+        path_text_lower = path_text.lower()
+        # Detect common ticket folder hints (support both slashes and backslashes)
+        path_suggests_ticket = any(
+            p in path_text_lower for p in ("/tickets/", "/ticket/", "\\tickets\\", "\\ticket\\")
+        )
 
         lines = self.extract_lines(text)
-        line_count = len(lines)
-
-        # Docs muy largos nunca tickets
-        if line_count > 60:
+        if len(lines) > 60:
             return False
 
-        # Contar matches
         strong_matches = sum(1 for pattern in STRONG_TICKET_PATTERNS if pattern.search(text))
         support_matches = sum(1 for pattern in SUPPORT_TICKET_PATTERNS if pattern.search(text))
         has_total = bool(TOTAL_LINE_PATTERN.search(text))
         has_date = bool(DATE_PATTERN.search(text))
 
-        # ESTRICto: al menos 1 STRONG + 1 SUPPORT + total + fecha ORExists 2 STRONG
-        if not ((strong_matches >= 2) or (strong_matches >= 1 and support_matches >= 1 and has_total and has_date)):
+        # Explicit reject if clear fiscal invoice markers are present
+        normalized_text = text.lower()
+        for marker in [
+            "base imponible",
+            "cuota iva",
+            "importe iva",
+            "total factura",
+            "subtotal",
+        ]:
+            if marker in normalized_text:
+                return False
+
+        # If the path suggests a ticket, require at least one clear ticket signal
+        if path_suggests_ticket and not (has_total or has_date or strong_matches >= 1 or support_matches >= 1):
             return False
 
-        # Rechazar si muchos NIF (docs fiscales)
-        nif_count = len(NIF_PATTERN.findall(text))
-        if nif_count > 3:
+        # Require a date or at least a total for reliable ticket detection.
+        # Accept tickets that lack an explicit date but have a clear total.
+        if not (has_date or has_total):
             return False
 
-        # Rechazar si muchas líneas OCR basura en top
+        # Relaxed acceptance: one strong match is enough, or support+date/total
+        if not (
+            strong_matches >= 1
+            or (support_matches >= 1 and (has_total or has_date))
+        ):
+            return False
+
+        # Reject very short or low-information texts even if they contain the word "ticket"
+        joined = "\n".join(lines).strip()
+        if len(joined) < 20:
+            return False
+
+        if len(NIF_PATTERN.findall(text)) > 3:
+            return False
+
         basura_top = sum(1 for line in lines[:10] if is_ocr_basura(line))
         if basura_top > 3:
             return False
@@ -116,39 +137,46 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         lines = self.extract_lines(text)
         result = self.build_result(text, file_path)
 
-        supplier = self.extract_supplier_name(lines, file_path)
-        if not supplier:
-            result.mark_as_failed("No proveedor válido detectado")
-            return result.finalize()
-
-        result.nombre_proveedor = supplier
+        result.nombre_proveedor = self.extract_supplier_name(lines, file_path)
         result.nif_proveedor = self.extract_supplier_tax_id_improved(text, lines)
         result.numero_factura = self.extract_ticket_number(text)
         result.fecha_factura = self.extract_ticket_date_improved(text)
         result.total = self.extract_ticket_total_improved(text, lines)
+        # For tickets, avoid filling subtotal/iva by default unless explicit labels exist
+        if re.search(r"\b(subtotal|base imponible)\b", text, re.IGNORECASE):
+            result.subtotal = self.extract_ticket_subtotal(text)
+        else:
+            result.subtotal = None
 
-        if result.total is None:
-            result.mark_as_failed("No total válido detectado")
-            return result.finalize()
+        if re.search(r"\b(cuota iva|importe iva|\biva\b)\b", text, re.IGNORECASE):
+            result.iva = self.extract_ticket_iva(text)
+        else:
+            result.iva = None
 
-        # Opcionales
-        result.subtotal = self.extract_ticket_subtotal(text)
-        result.iva = self.extract_ticket_iva(text)
+        # Extract simple Spanish postal code (5 digits) from header lines (first ~10 lines).
+        # Ignore lines that look like they contain prices/amounts.
+        result.cp_cliente = None
+        for line in lines[:10]:
+            if re.search(r"\d+[\.,]\d{2}", line):
+                # likely a price line, skip
+                continue
+            m = re.search(r"\b(\d{5})\b", line)
+            if m:
+                result.cp_cliente = m.group(1)
+                break
 
-        result.tipo_documento = "ticket"
         return result.finalize()
 
     def extract_supplier_name(self, lines: List[str], file_path: str | Path) -> str | None:
-            ignored_patterns = [
-                re.compile(r"(?i)(factura\s+simplificada|subtotal|total|base|cuota|producto|importe|entregado|cambio|efectivo|tel[.:]|avenida|calle)"),
-                re.compile(r"(?i)(c/|c\.|poblacion|provincia)"),
-                re.compile(r"(?i)(informacion\s+adicional|referencia|cumplimiento|normativa)"),
-                re.compile(r"(?i)(nif\s+cliente|cliente)"),
-            ]
+        ignored_patterns = [
+            re.compile(r"(?i)(factura\s+simplificada|subtotal|total|base|cuota|producto|importe|entregado|cambio|efectivo|tel[.:]|avenida|calle)"),
+            re.compile(r"(?i)(c/|c\.|poblacion|provincia)"),
+            re.compile(r"(?i)(informacion\s+adicional|referencia|cumplimiento|normativa)"),
+            re.compile(r"(?i)(nif\s+cliente|cliente)"),
+        ]
 
-        candidates = []
-
-        for i, line in enumerate(lines[:10]):  # Top 10
+        candidates: list[tuple[int, str, str]] = []
+        for idx, line in enumerate(lines[:10]):
             if is_ocr_basura(line):
                 continue
 
@@ -159,15 +187,53 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
             if any(pattern.search(cleaned) for pattern in ignored_patterns):
                 continue
 
-            # Más estricto: min len, tiene sentido como nombre
-            if len(cleaned) >= 4 and is_valid_name_candidate(cleaned) and not cleaned.isupper():
-                candidates.append(cleaned)
+            if len(cleaned) >= 4 and is_valid_name_candidate(cleaned):
+                candidates.append((idx, cleaned, line))
 
-        best = pick_best_name(candidates)
-        if best:
+        # If a NIF appears in the first lines, prefer the candidate on the same
+        # line or the immediately previous line.
+        nif_candidates: list[tuple[int, str]] = []
+        for i, line in enumerate(lines[:10]):
+            nifs = NIF_PATTERN.findall(line)
+            for nif in nifs:
+                nif_candidates.append((i, nif))
+
+        if nif_candidates and candidates:
+            nif_index = nif_candidates[0][0]
+            # prefer candidate on same line or previous
+            for idx, cleaned, orig in candidates:
+                if idx == nif_index or idx == nif_index - 1:
+                    return cleaned
+
+        # If a line contains a person name plus a NIF (e.g. "Juan Perez / NIF: X...")
+        # prefer that person's name as supplier (more reliable than noisy commercial OCR)
+        for idx, line in enumerate(lines[:10]):
+            if NIF_PATTERN.search(line):
+                # try to extract a name-like portion before common separators
+                parts = re.split(r"[/\\\-]|NIF[:\s]*", line, flags=re.IGNORECASE)
+                if parts:
+                    candidate = clean_name_candidate(parts[0])
+                    if candidate and not is_ocr_basura(candidate):
+                        return candidate
+
+        # Heuristic: if top lines look like product/menu lines (multiple lines
+        # that start with an item count or contain prices), avoid filling
+        # proveedor unless we have NIF evidence.
+        product_like = 0
+        for line in lines[:10]:
+            if re.match(r"^\s*\d+\s+\S+", line):
+                product_like += 1
+            if re.search(r"\d+[\.,]\d{2}", line):
+                product_like += 1
+
+        if product_like >= 2 and not nif_candidates:
+            return None
+
+        # Fallback: pick best by existing heuristic
+        best = pick_best_name([c[1] for c in candidates])
+        if best and not is_ocr_basura(best):
             return best
 
-        # Solo si no hay nada, folder hint (no forzar)
         folder_hint = self.get_folder_hint_name(file_path)
         if folder_hint and len(folder_hint) > 4 and not is_ocr_basura(folder_hint):
             return folder_hint
@@ -175,28 +241,33 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         return None
 
     def extract_supplier_tax_id_improved(self, text: str, lines: List[str]) -> str | None:
-        """NIF cerca del proveedor, no cliente."""
-        # Buscar NIF en top 20 líneas después del proveedor implícito
-        nif_candidates = []
-        for i, line in enumerate(lines[:25]):
+        nif_candidates: list[tuple[int, str]] = []
+        for index, line in enumerate(lines[:25]):
             nifs = NIF_PATTERN.findall(line)
             for nif in nifs:
-                # Ignorar cerca de "cliente"
-                if i > 0 and "cliente" in lines[i-1].lower():
+                # Skip NIFs that are clearly associated to a client line
+                if index > 0 and "cliente" in lines[index - 1].lower():
                     continue
-                nif_candidates.append((i, nif))
+
+                # If the NIF appears on a line that looks like a person (e.g. "Nombre Apellido / NIF: ..."),
+                # treat it as likely a person identifier and avoid returning it as supplier tax id.
+                line_lower = line.lower()
+                if "nif" in line_lower:
+                    # heuristics: if line contains two words with letters (a personal name), skip
+                    if re.search(r"[A-Za-zÀ-ÿ]+\s+[A-Za-zÀ-ÿ]+", line):
+                        continue
+
+                nif_candidates.append((index, nif))
 
         if nif_candidates:
-            # Tomar el primer NIF válido (más arriba)
             return nif_candidates[0][1]
 
-        return self.extract_supplier_tax_id(text)  # Fallback
+        return self.extract_supplier_tax_id(text)
 
     def extract_ticket_date_improved(self, text: str) -> str | None:
-        # Priorizar cerca de "fecha"
-        fecha_sections = re.split(r"(?i)fecha", text, flags=re.I)[1:3]  # Primer "fecha"
-        if fecha_sections:
-            local_match = DATE_PATTERN.search(fecha_sections[0])
+        fecha_sections = re.split(r"(?i)fecha", text, maxsplit=1)
+        if len(fecha_sections) > 1:
+            local_match = DATE_PATTERN.search(fecha_sections[1])
             if local_match:
                 candidate = normalize_date(local_match.group(1))
                 if candidate:
@@ -205,29 +276,41 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         return self.extract_ticket_date(text)
 
     def extract_ticket_total_improved(self, text: str, lines: List[str]) -> float | None:
-        # Priorizar últimas líneas con TOTAL
-        for line in reversed(lines[-10:]):  # Últimas 10
-            match = TOTAL_LINE_PATTERN.search(line)
-            if match:
+        for line in reversed(lines[-10:]):
+            # Find all occurrences of the TOTAL_LINE_PATTERN in the line and take the last one
+            matches = list(TOTAL_LINE_PATTERN.finditer(line))
+            if matches:
+                last = matches[-1]
                 try:
-                    return float(match.group(1).replace(',', '.'))
-                except ValueError:
-                    pass
+                    return float(last.group(1).replace(",", "."))
+                except (ValueError, IndexError):
+                    # fallback to scanning numbers inside the matched text
+                    numbers = re.findall(r"(\d+(?:[\.,]\d{2})?)", last.group(0))
+                    if numbers:
+                        try:
+                            return float(numbers[-1].replace(",", "."))
+                        except ValueError:
+                            pass
 
-        # Fallback global
-        match = TOTAL_LINE_PATTERN.search(text)
-        if match:
+        # Fallback: find all TOTAL matches in the whole text and pick the last one
+        matches = list(TOTAL_LINE_PATTERN.finditer(text))
+        if matches:
+            last = matches[-1]
             try:
-                return float(match.group(1).replace(',', '.'))
-            except ValueError:
-                pass
+                return float(last.group(1).replace(",", "."))
+            except (ValueError, IndexError):
+                numbers = re.findall(r"(\d+(?:[\.,]\d{2})?)", last.group(0))
+                if numbers:
+                    try:
+                        return float(numbers[-1].replace(",", "."))
+                    except ValueError:
+                        pass
 
         return self.extract_ticket_total(text)
 
-    # Mantiene los métodos originales como fallback
     def extract_ticket_number(self, text: str) -> str | None:
         patterns = [
-            r"(?:n[ºo]\s*op\.?|n[ºo]\s*operaci[oó]n)\s*[:#\-]?\s*([A-Z0-9\/\-.]+)",
+            r"(?:n[ºo°]\s*op\.?|n[ºo°]\s*operaci[oó]n)\s*[:#\-]?\s*([A-Z0-9\/\-.]+)",
             r"(?:identificador)\s*[:#\-]?\s*([A-Z0-9\/\-.]+)",
             r"(?:ticket)\s*[:#\-]?\s*([A-Z0-9\/\-.]+)",
         ]
@@ -264,41 +347,19 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         return self.extract_date(text)
 
     def extract_ticket_subtotal(self, text: str) -> float | None:
-        value = self.extract_labeled_amount(
-            text,
-            [
-                r"\bbase\b",
-                r"subtotal",
-                r"base\s+imponible",
-            ],
-        )
+        value = self.extract_labeled_amount(text, [r"\bbase\b", r"subtotal", r"base\s+imponible"])
         if value is not None:
             return value
-
         return self.extract_subtotal(text)
 
     def extract_ticket_iva(self, text: str) -> float | None:
-        value = self.extract_labeled_amount(
-            text,
-            [
-                r"\bcuota\b",
-                r"\biva\b",
-            ],
-        )
+        value = self.extract_labeled_amount(text, [r"\bcuota\b", r"\biva\b"])
         if value is not None:
             return value
-
         return self.extract_iva(text)
 
     def extract_ticket_total(self, text: str) -> float | None:
-        value = self.extract_labeled_amount(
-            text,
-            [
-                r"total\s*\(.*?incl.*?\)",
-                r"\btotal\b",
-            ],
-        )
+        value = self.extract_labeled_amount(text, [r"total\s*\(.*?incl.*?\)", r"\btotal\b"])
         if value is not None:
             return value
-
         return self.extract_total(text)

@@ -166,7 +166,7 @@ def test_saltoki_alicante_extracts_totals_and_header() -> None:
     )
 
     assert result.parser_usado == "saltoki"
-    assert result.nombre_proveedor == "SALTOKI ALICANTE"
+    assert result.nombre_proveedor == "SALTOKI ALICANTE, S.L."
     assert result.nif_proveedor == "B71406623"
     assert result.nombre_cliente == "Daniel Cuenca Moya"
     assert result.nif_cliente == "48334490J"
@@ -186,7 +186,7 @@ def test_saltoki_benidorm_extracts_totals_and_header() -> None:
     )
 
     assert result.parser_usado == "saltoki"
-    assert result.nombre_proveedor == "SALTOKI BENIDORM"
+    assert result.nombre_proveedor == "SALTOKI BENIDORM, S.L."
     assert result.nif_proveedor == "B71406607"
     assert result.nombre_cliente == "Daniel Cuenca Moya"
     assert result.nif_cliente == "48334490J"
@@ -221,7 +221,7 @@ def test_saltoki_benidorm_ocr_fragment_recovers_base_iva_total() -> None:
     )
 
     assert result.parser_usado == "saltoki"
-    assert result.nombre_proveedor == "SALTOKI BENIDORM"
+    assert result.nombre_proveedor == "SALTOKI BENIDORM, S.L."
     assert result.nif_proveedor == "B71406607"
     assert result.nombre_cliente == "Daniel Cuenca Moya"
     assert result.nif_cliente == "48334490J"
@@ -230,6 +230,104 @@ def test_saltoki_benidorm_ocr_fragment_recovers_base_iva_total() -> None:
     assert result.subtotal == pytest.approx(118.04)
     assert result.iva == pytest.approx(24.79)
     assert result.total == pytest.approx(142.83)
+
+
+SALTOKI_ALICANTE_MULTIPAGE_FINAL_SUMMARY_TEXT = """REF. PROVEEDOR
+F A C T U R A
+CLIENTE FECHA NÚMERO HOJA
+369718 7-03-2026 13803 1
+SALTOKI ALICANTE, S.L.
+CIF: B71406623
+CUENCA MOYA, DANIEL
+48334490J
+IMP. BRUTO DESCUENTOS % CARGOS %
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+FORMA DE PAGO TOTAL
+€
+
+REF. PROVEEDOR
+F A C T U R A
+CLIENTE FECHA NÚMERO HOJA
+369718 7-03-2026 13803 2
+SALTOKI ALICANTE, S.L.
+CIF: B71406623
+CUENCA MOYA, DANIEL
+48334490J
+SUMA ANTERIOR ........> 2.134,99
+IMP. BRUTO DESCUENTOS % CARGOS %
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+FORMA DE PAGO TOTAL
+€
+
+REF. PROVEEDOR
+F A C T U R A
+CLIENTE FECHA NÚMERO HOJA
+369718 7-03-2026 13803 3
+SALTOKI ALICANTE, S.L.
+CIF: B71406623
+CUENCA MOYA, DANIEL
+48334490J
+SUMA ANTERIOR ........> 5.120,74
+IMP. BRUTO DESCUENTOS % CARGOS %
+5.120,74
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+5.120,74 21 , 0 0 1.075,36 6.196,10
+FORMA DE PAGO TOTAL
+TRANSFERENCIA A 30 IBAN..: ES69 0049 1821 0922 1068 2951
+6.196,10 €
+al
+ne
+sodiulcni
+lanosrep
+retcárac
+ed sotad
+sol
+áratart
+elbasnopseR
+lE
+.ikotlaS
+opurG
+led
+saserpme
+ed
+otser
+le
+omoc
+ísa
+,arutcaf
+etneserp
+al
+ed
+rosime
+le
+otnat
+nos
+otneimatart
+led
+selbasnopseR
+soL
+dadicavirP
+. 
+3-04-2026 6.196,10
+"""
+
+
+def test_saltoki_alicante_multipage_prefers_last_fiscal_summary_block() -> None:
+    parser = SaltokiInvoiceParser()
+
+    result = parser.parse(
+        SALTOKI_ALICANTE_MULTIPAGE_FINAL_SUMMARY_TEXT,
+        Path(r"C:\temp\saltoki\alicante\13803_20260307_38.pdf"),
+    )
+
+    assert result.parser_usado == "saltoki"
+    assert result.nombre_proveedor == "SALTOKI ALICANTE, S.L."
+    assert result.nif_proveedor == "B71406623"
+    assert result.numero_factura == "13803"
+    assert result.fecha_factura == "07-03-2026"
+    assert result.subtotal == pytest.approx(5120.74)
+    assert result.iva == pytest.approx(1075.36)
+    assert result.total == pytest.approx(6196.10)
 
 
 SALTOKI_BENIDORM_OCR_FRAGMENT_BROKEN_RATE_TEXT = """REF. PROVEEDOR
@@ -256,10 +354,137 @@ def test_saltoki_benidorm_ocr_fragment_with_split_rate_recovers_totals() -> None
     )
 
     assert result.parser_usado == "saltoki"
-    assert result.nombre_proveedor == "SALTOKI BENIDORM"
+    assert result.nombre_proveedor == "SALTOKI BENIDORM, S.L."
     assert result.nif_proveedor == "B71406607"
     assert result.numero_factura == "6475"
     assert result.fecha_factura == "31-01-2026"
     assert result.subtotal == pytest.approx(118.04)
     assert result.iva == pytest.approx(24.79)
     assert result.total == pytest.approx(142.83)
+
+
+def test_saltoki_alicante_embedded_header_prioritizes_invoice_date_over_albaran_date() -> None:
+    parser = SaltokiInvoiceParser()
+    text = """REF. PROVEEDOR
+_F_A_C_T_U_R_A_
+CLIENTE FECHA NÚMERO HOJA
+SALTOKI ALICANTE, S.L. 369718 31-03-2026 20083 1
+CIF: B71406623C/ Rosa de los Vientos, 13 03007 Alicante
+Tel: 965 31 37 61
+CUENCA MOYA, DANIEL
+alicante@saltoki.es
+CL MARAVALL 31 2o E
+03501 BENIDORM
+ALICANTE
+N.I.F. 48334490J
+SALTOKI ALICANTE, S.L. inscrita en el Registro Mercantil de Navarra, al tomo 1.996, folio 155, hoja NA-39804, ins. 1a
+CÓDIGO CANTIDAD CONCEPTO PRECIO % DTO IMPORTE
+ALBARAN No 836.131 FECHA 25-03-2026
+S/REF:REJILLA+COMPUERTA
+4350011514 3,00 REJILLA IMPULSION 300X150MM H DOBLE BLANCA MA11 35,060 70 31,55
+4354001114 3,00 REGULADOR DE CAUDAL C/PALANCA 300X150 MA46 19,050 65 20,00
+IMP. BRUTO DESCUENTOS % CARGOS %
+51,55
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+51,55 21,00 10,83 62,38
+FORMA DE PAGO TOTAL
+TRANSFERENCIA A 30 IBAN..: ES69 0049 1821 0922 1068 2951
+.
+24-04-2026 62,38 62,38 €
+"""
+
+    result = parser.parse(
+        text,
+        Path(r"C:\temp\saltoki\alicante\20083_20260331_38.pdf"),
+    )
+
+    assert result.numero_factura == "20083"
+    assert result.fecha_factura == "31-03-2026"
+    assert result.subtotal == pytest.approx(51.55)
+    assert result.iva == pytest.approx(10.83)
+    assert result.total == pytest.approx(62.38)
+
+
+def test_saltoki_benidorm_abono_forces_negative_amounts() -> None:
+    parser = SaltokiInvoiceParser()
+    text = """REF. PROVEEDOR
+** A B O N O **
+CLIENTE FECHA NÚMERO HOJA
+369718 15-03-2026 17971 1
+SALTOKI BENIDORM, S.L.
+CIF: B71406607 CUENCA MOYA, DANIEL
+Avda. Finestrat,12 03502 Benidorm (Alicante) CL MARAVALL 31 2o E
+Tel: 965 86 34 11
+03501 BENIDORM
+benidorm@saltoki.es
+ALICANTE
+N.I.F. 48334490J
+SALTOKI BENIDORM, S.L. inscrita en el Registro Mercantil de Navarra, al tomo 1.996, folio 166, Sección 8, hoja NA-39805, insc. 1a
+CÓDIGO CANTIDAD CONCEPTO PRECIO % DTO IMPORTE
+ALBARAN No 370.775 FECHA 9-03-2026
+2126050030 2,00PUERTA ALUMINIO 30X45 CIERRE ALLEN 128,400 40 154,08-
+1502025270 1,00MANGUITO LATON POLIETILENO 25X25 13,710 50 6,86-
+1502093512 1,00CODO M 90 LATON POLIETILENO 20X1/2 11,170 50 5,59-
+1502094023 1,00ENLACE ROSCA H LATON POLIETILENO 25X3/4 7,290 50 3,65-
+2122000120 2,00RACOR CONTADOR 3/4 X 1 10,980 32 14,93-
+2122000120 2,00RACOR CONTADOR 3/4 X 1 10,980 32 14,93-
+2125020160 2,00VALVULA SALIDA RT 13-15MM 3/4 LINEAL ANTI RETORNO 36,740 40 44,09-
+2125020131 2,00VALVULA SALIDA RT ANTIRRETORNODN20 P/CONTADOR 15MM 1 ESCUA 39,240 40 47,09-
+IMP. BRUTO DESCUENTOS % CARGOS %
+291,22
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+291,22- 21 , 0 0 61,16- 352,38-
+FORMA DE PAGO TOTAL
+TRANSFERENCIA A 30 IBAN..: ES52 0049 1821 0526 1068 2935
+352,38- €
+"""
+
+    result = parser.parse(
+        text,
+        Path(r"C:\temp\saltoki\benidorm\Copia de 17971_20260315_40.pdf"),
+    )
+
+    assert result.numero_factura == "17971"
+    assert result.fecha_factura == "15-03-2026"
+    assert result.subtotal == pytest.approx(-291.22)
+    assert result.iva == pytest.approx(-61.16)
+    assert result.total == pytest.approx(-352.38)
+
+
+def test_saltoki_benidorm_embedded_header_prioritizes_invoice_date_over_albaran_date() -> None:
+    parser = SaltokiInvoiceParser()
+    text = """REF. PROVEEDOR
+_F_A_C_T_U_R_A_
+CLIENTE FECHA NÚMERO HOJA
+SALTOKI BENIDORM, S.L. 369718 31-03-2026 22998 1
+CIF: B71406607
+Avda. Finestrat,12 03502 Benidorm (Alicante)
+Tel: 965 86 34 11 CUENCA MOYA, DANIEL
+benidorm@saltoki.es CL MARAVALL 31 2o E
+03501 BENIDORM
+ALICANTE
+N.I.F. 48334490J
+SALTOKI BENIDORM, S.L. inscrita en el Registro Mercantil de Navarra, al tomo 1.996, folio 166, Sección 8, hoja NA-39805, insc. 1a
+CÓDIGO CANTIDAD CONCEPTO PRECIO % DTO IMPORTE
+ALBARAN No 387.092 FECHA 30-03-2026
+4202000013 4,00 TUERCA FRIGORIFICA REDUCIDA 1/2X3/8 SAE 1,850 NETO 7,40
+IMP. BRUTO DESCUENTOS % CARGOS %
+7,40
+BASE IMPONIBLE % I.V.A. % R. EQUIV. TOTAL
+7,40 21,00 1,55 8,95
+FORMA DE PAGO TOTAL
+TRANSFERENCIA A 30 IBAN..: ES52 0049 1821 0526 1068 2935
+.
+29-04-2026 8,95 8,95 €
+"""
+
+    result = parser.parse(
+        text,
+        Path(r"C:\temp\saltoki\benidorm\Copia de 22998_20260331_40.pdf"),
+    )
+
+    assert result.numero_factura == "22998"
+    assert result.fecha_factura == "31-03-2026"
+    assert result.subtotal == pytest.approx(7.40)
+    assert result.iva == pytest.approx(1.55)
+    assert result.total == pytest.approx(8.95)

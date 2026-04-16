@@ -123,8 +123,15 @@ class ParsedInvoiceData:
     subtotal: float | None = None
     iva: float | None = None
     total: float | None = None
-    texto_crudo: str = ""
-    metadatos: dict[str, str] = field(default_factory=dict)
+    tipo_documento: str = "factura"
+    status: str = "success"
+    failure_reason: str | None = None
+    texto_crudo: str = field(default="", repr=False)
+    metadatos: dict[str, str] = field(default_factory=dict, repr=False)
+
+    def mark_as_failed(self, reason: str | None = None) -> None:
+        self.status = "failed"
+        self.failure_reason = reason
 
     def finalize(self) -> "ParsedInvoiceData":
         self.nombre_proveedor = clean_name_candidate(self.nombre_proveedor)
@@ -198,9 +205,88 @@ class BaseInvoiceParser(ABC):
         parent_name = re.sub(r"\s+", " ", parent_name).strip()
         return clean_name_candidate(parent_name)
 
+    def _normalize_lookup_text(self, value: str | None) -> str:
+        if not value:
+            return ""
+
+        import unicodedata
+
+        normalized = unicodedata.normalize("NFKD", value)
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        normalized = normalized.lower()
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _compact_lookup_text(self, value: str | None) -> str:
+        return self._normalize_lookup_text(value).replace(" ", "")
+
+    def _can_handle_by_supplier(
+        self,
+        text: str,
+        *,
+        supplier_name: str | None = None,
+        supplier_tax_id: str | None = None,
+        file_path: str | Path | None = None,
+    ) -> bool:
+        """Strict supplier identity check.
+
+        Rules:
+        - Return True ONLY if the supplier tax id matches exactly OR the full
+          supplier name (normalized) matches exactly as a contiguous token
+          sequence in the normalized document text or normalized file path.
+        - Use normalized text (lowercased, accents removed, single spaces).
+        - Do NOT allow partial/substring matches.
+        """
+        # Normalize document text once
+        normalized_text = self._normalize_lookup_text(text)
+
+        # 1) STRONG MATCH in TEXT only: exact tax id OR full normalized supplier name
+        # Check exact tax id in the document (using extractor to ensure exactness)
+        if supplier_tax_id:
+            try:
+                from src.utils.ids import normalize_tax_id
+
+                normalized_tax = normalize_tax_id(supplier_tax_id)
+            except Exception:
+                normalized_tax = supplier_tax_id
+
+            if normalized_tax:
+                candidates = self.extract_exact_tax_ids(text)
+                if normalized_tax in candidates:
+                    return True
+
+        # Check full supplier name as a contiguous normalized phrase in document text
+        if supplier_name:
+            normalized_name = self._normalize_lookup_text(supplier_name)
+            if normalized_name:
+                # ensure we match the full phrase, not substrings of tokens
+                pattern = re.compile(rf"(?<![a-z0-9]){re.escape(normalized_name)}(?![a-z0-9])")
+                if pattern.search(normalized_text):
+                    return True
+
+        # 2) FALLBACK CONTROLLED: only if no strong text match above
+        # allow matches in file path using compacted name (no spaces) or tax id in filename
+        if file_path:
+            path_text = self.get_path_text(file_path)
+            normalized_path = self._normalize_lookup_text(path_text)
+
+            # tax id in filename (compact form)
+            if supplier_tax_id:
+                compact_tax = supplier_tax_id.replace(" ", "")
+                if compact_tax and compact_tax.lower() in path_text:
+                    return True
+
+            # compact name (no spaces) in path
+            if supplier_name:
+                compact_name = normalized_name.replace(" ", "") if supplier_name else ""
+                if compact_name and compact_name in normalized_path.replace(" ", ""):
+                    return True
+
+        # PROHIBITED: partial matches or generic contains are not allowed
+        return False
+
     @staticmethod
     def clean_invoice_number_candidate(value: str | None) -> str | None:
-        """Filtra basura OCR en números de factura."""
         if value is None:
             return None
 
@@ -214,9 +300,10 @@ class BaseInvoiceParser(ABC):
         if lowered in INVALID_INVOICE_NUMBER_VALUES:
             return None
 
-        # OCR: rechazar solo vocales/consonantes puras largas
-        if len(cleaned) > 4 and (re.fullmatch(r"[aeiouáéíóú]+", cleaned, re.IGNORECASE) or 
-                                 re.fullmatch(r"[bcdfghjklmnpqrstvwxyz]+", cleaned, re.IGNORECASE)):
+        if len(cleaned) > 4 and (
+            re.fullmatch(r"[aeiouáéíóú]+", cleaned, re.IGNORECASE)
+            or re.fullmatch(r"[bcdfghjklmnpqrstvwxyz]+", cleaned, re.IGNORECASE)
+        ):
             return None
 
         if len(cleaned) <= 2 and lowered not in {"f1", "f2", "n1"}:
@@ -225,7 +312,6 @@ class BaseInvoiceParser(ABC):
         if lowered.startswith(("fecha", "direc", "descri")):
             return None
 
-        # Debe tener mix alfanumérico o ser muy corto/plausible
         if len(cleaned) > 6 and not re.search(r"\d", cleaned):
             return None
 
@@ -372,12 +458,11 @@ class BaseInvoiceParser(ABC):
         return None
 
     def extract_summary_amounts(self, text: str) -> tuple[float | None, float | None, float | None]:
-        """Prioriza BLOQUE FINAL coherente: Base+IVA=Total exacto (tol 0.01€)."""
         lines = self.extract_lines(text)
         if not lines:
             return None, None, None
 
-        tail_lines = lines[-25:]  # Más contexto final
+        tail_lines = lines[-25:]
         base_candidates: list[float] = []
         iva_candidates: list[float] = []
         total_candidates: list[float] = []
@@ -400,14 +485,12 @@ class BaseInvoiceParser(ABC):
                 if values:
                     total_candidates.append(values[-1])
 
-        # PRIORIDAD 1: Tripletas EXACTAS Base+IVA=Total (bloque final)
         for total_value in reversed(total_candidates):
             for base_value in reversed(base_candidates):
                 for iva_value in reversed(iva_candidates):
-                    if abs((base_value + iva_value) - total_value) <= 0.01:  # Más estricto
+                    if abs((base_value + iva_value) - total_value) <= 0.01:
                         return base_value, iva_value, total_value
 
-        # Fallback orden natural
         base_value = base_candidates[-1] if base_candidates else None
         iva_value = iva_candidates[-1] if iva_candidates else None
         total_value = total_candidates[-1] if total_candidates else None
@@ -481,7 +564,7 @@ class BaseInvoiceParser(ABC):
         value = self.extract_labeled_amount(
             text,
             [
-                r"neto\s+a\s+pagar",
+                r"neto\s+a\s*pagar",
                 r"importe\s+total",
                 r"total\s+factura",
                 r"total\s+ii",
@@ -492,27 +575,42 @@ class BaseInvoiceParser(ABC):
         return self._apply_credit_sign(text, value)
 
     def extract_tax_id_from_text(self, text: str) -> str | None:
-        label_patterns = [
-            r"(?:nif|cif|dni|nie)\s*(?:cliente)?\s*[:\-]?\s*([^\n\r]+)",
-            r"(?:vat|tax\s+id)\s*[:\-]?\s*([^\n\r]+)",
+        lines = self.extract_lines(text)
+        inline_label_patterns = [
+            re.compile(r"(?:nif|cif|dni|nie)\s*(?:cliente)?\s*[:\-]?\s*([^\n\r]+)", re.IGNORECASE),
+            re.compile(r"(?:vat|tax\s+id)\s*(?:cliente)?\s*[:\-]?\s*([^\n\r]+)", re.IGNORECASE),
+        ]
+        explicit_customer_patterns = [
+            re.compile(r"(?:nif|cif|dni|nie)\s+cliente\s*[:\-]?\s*([^\n\r]+)", re.IGNORECASE),
+            re.compile(r"(?:vat|tax\s+id)\s+cliente\s*[:\-]?\s*([^\n\r]+)", re.IGNORECASE),
         ]
 
-        for pattern_text in label_patterns:
-            match = re.search(pattern_text, text, re.IGNORECASE)
-            if not match:
+        for index, line in enumerate(lines):
+            if not CUSTOMER_LINE_PATTERN.search(line):
                 continue
 
-            line_fragment = match.group(1)
-            candidates = self.extract_exact_tax_ids(line_fragment)
-            if candidates:
-                return candidates[0]
+            candidate_window = lines[index:index + 3]
+            for candidate_line in candidate_window:
+                candidates = self.extract_exact_tax_ids(candidate_line)
+                if candidates:
+                    return candidates[0]
 
-            candidate = normalize_tax_id(line_fragment)
-            if candidate:
-                return candidate
+                for pattern in inline_label_patterns:
+                    match = pattern.search(candidate_line)
+                    if not match:
+                        continue
 
-        candidates = self.extract_exact_tax_ids(text)
-        return candidates[0] if candidates else None
+                    candidate = normalize_tax_id(match.group(1))
+                    if candidate:
+                        return candidate
+
+        for pattern in explicit_customer_patterns:
+            for match in pattern.finditer(text):
+                candidate = normalize_tax_id(match.group(1))
+                if candidate:
+                    return candidate
+
+        return None
 
     def extract_supplier_tax_id(self, text: str) -> str | None:
         lines = self.extract_lines(text)
@@ -533,18 +631,30 @@ class BaseInvoiceParser(ABC):
                 continue
 
             line_fragment = match.group(1)
-            candidates = [candidate for candidate in self.extract_exact_tax_ids(line_fragment) if candidate not in customer_tax_ids]
+            candidates = [
+                candidate
+                for candidate in self.extract_exact_tax_ids(line_fragment)
+                if candidate not in customer_tax_ids
+            ]
             if candidates:
                 return candidates[0]
 
         for line in lines[:12]:
             if CUSTOMER_LINE_PATTERN.search(line):
                 continue
-            candidates = [candidate for candidate in self.extract_exact_tax_ids(line) if candidate not in customer_tax_ids]
+            candidates = [
+                candidate
+                for candidate in self.extract_exact_tax_ids(line)
+                if candidate not in customer_tax_ids
+            ]
             if candidates:
                 return candidates[0]
 
-        all_candidates = [candidate for candidate in self.extract_exact_tax_ids(text) if candidate not in customer_tax_ids]
+        all_candidates = [
+            candidate
+            for candidate in self.extract_exact_tax_ids(text)
+            if candidate not in customer_tax_ids
+        ]
         return all_candidates[0] if all_candidates else None
 
     def extract_postal_code_from_text(self, text: str) -> str | None:
@@ -594,7 +704,6 @@ class BaseInvoiceParser(ABC):
         return pick_best_name(candidates)
 
     def is_probable_noise_name(self, value: str | None) -> bool:
-        """Detecta ruido OCR: palíndromos largos, múltiples '.', fragmentos repetidos."""
         if value is None:
             return True
 
@@ -602,16 +711,13 @@ class BaseInvoiceParser(ABC):
         if not cleaned:
             return True
 
-        # OCR palíndromos (ej: "otnemucod" == "documento" rev)
         compact = re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", "", cleaned)
         if compact and compact == compact[::-1] and len(compact) >= 6:
             return True
 
-        # Múltiples puntos + corto
         if cleaned.count(".") >= 2 and len(compact) <= 5:
             return True
 
-        # Fragmentos OCR comunes (ajoh=hoja, oilof=folio)
         if re.match(r"^\s*(ajoh?|oilof?|fio lo)\s*$", cleaned, re.IGNORECASE):
             return True
 
@@ -657,7 +763,6 @@ class BaseInvoiceParser(ABC):
         lines = self.extract_lines(text)
         line_count = len(lines)
 
-        # Stricter: corto OR muchos totales/productos listados
         is_short_ticket = line_count < 50
         has_many_totals = sum(1 for line in lines if TOTAL_LINE_PATTERN.search(line)) > 10
         if not (is_short_ticket or has_many_totals):

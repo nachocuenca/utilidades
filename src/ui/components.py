@@ -172,6 +172,7 @@ def render_export_download(path_str: str | None, label: str, mime: str) -> None:
             data=file_handler.read(),
             file_name=path.name,
             mime=mime,
+            on_click="ignore",
             use_container_width=True,
         )
 

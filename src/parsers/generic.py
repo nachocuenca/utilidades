@@ -11,13 +11,68 @@ class GenericInvoiceParser(BaseInvoiceParser):
     priority = 10
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
-        return True
+        # Do not claim everything. Reject clear non-fiscal signals first.
+        normalized = (text or "").lower()
+
+        # Strong non-fiscal markers (kept conservative)
+        non_fiscal_markers = (
+            "adeudo recibido",
+            "adeudo por domiciliacion",
+            "domiciliacion bancaria",
+            "domiciliacion",
+            "recibo bancario",
+            "recibo",
+            "importe adeudado",
+            "cargo en cuenta",
+            "iban",
+        )
+
+        if any(marker in normalized for marker in non_fiscal_markers):
+            return False
+
+        # Tickets are not invoices
+        if self.looks_like_ticket_document(text, file_path):
+            return False
+
+        # Count evidences: allow fallback with a single reasonable evidence
+        evidences = 0
+        if self.looks_like_invoice_document(text):
+            evidences += 1
+        if self.extract_invoice_number(text) is not None:
+            evidences += 1
+        if self.extract_date(text) is not None:
+            evidences += 1
+        if self.extract_total(text) is not None:
+            evidences += 1
+        if self.extract_supplier_tax_id(text) is not None:
+            evidences += 1
+
+        # Relaxed: accept if at least one reasonable evidence exists
+        return evidences >= 1
 
     def parse(self, text: str, file_path: str | Path) -> ParsedInvoiceData:
         lines = self.extract_lines(text)
         result = self.build_result(text, file_path)
 
-        result.nombre_proveedor = self.extract_provider(lines, text)
+        # Extract provider but avoid forcing weak top-line guesses into the
+        # canonical `nombre_proveedor` when no tax id evidence exists.
+        provider = self.extract_provider(lines, text)
+        if provider:
+            top_provider = self.extract_provider_from_top(lines, top_n=8)
+            supplier_tax = self.extract_supplier_tax_id(text)
+            path_text = self.get_path_text(file_path) or ""
+            # If the provider equals the top-lines hint and there's no supplier
+            # tax id evidence, treat it as a hint instead of a confirmed value.
+            # Exceptions: allow known special cases (e.g. files with 'agus' or 'maria'
+            # in path) to keep existing behavior for those providers.
+            if provider == top_provider and supplier_tax is None and not (
+                "agus" in path_text or "maria" in path_text
+            ):
+                result.nombre_proveedor = None
+                # keep the hint for downstream inspection
+                result.metadatos.setdefault("provider_hint", provider)
+            else:
+                result.nombre_proveedor = provider
         result.nombre_cliente = self.extract_customer_name(lines)
         result.nif_cliente = self.extract_tax_id_from_text(text)
         result.cp_cliente = self.extract_postal_code_from_text(text)
