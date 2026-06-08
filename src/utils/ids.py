@@ -11,6 +11,35 @@ STRUCTURED_SPANISH_TAX_ID_PATTERN = re.compile(
     r"^(?:\d{8}[A-Z]|[XYZ]\d{7}[A-Z]|[KLM]\d{7}[A-Z]|[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J])$",
     re.IGNORECASE,
 )
+EU_VAT_ID_PATTERN = re.compile(r"^(?!ES)([A-Z]{2})(?=[A-Z0-9]*\d)[A-Z0-9]{8,12}$", re.IGNORECASE)
+EU_VAT_PREFIXES = {
+    "AT",
+    "BE",
+    "BG",
+    "CY",
+    "CZ",
+    "DE",
+    "DK",
+    "EE",
+    "EL",
+    "FI",
+    "FR",
+    "HR",
+    "HU",
+    "IE",
+    "IT",
+    "LT",
+    "LU",
+    "LV",
+    "MT",
+    "NL",
+    "PL",
+    "PT",
+    "RO",
+    "SE",
+    "SI",
+    "SK",
+}
 KNOWN_TAX_ID_PREFIXES = (
     "CIF",
     "NIF",
@@ -62,6 +91,10 @@ def normalize_tax_id(value: str | None) -> str | None:
     compacted = compact_identifier(value)
     if compacted is None:
         return None
+
+    eu_match = EU_VAT_ID_PATTERN.fullmatch(compacted)
+    if eu_match and eu_match.group(1).upper() in EU_VAT_PREFIXES:
+        return compacted
 
     for candidate in _iter_tax_id_variants(compacted):
         if _is_structured_spanish_tax_id(candidate):

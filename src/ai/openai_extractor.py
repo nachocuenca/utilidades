@@ -7,7 +7,7 @@ from src.ai.schemas import validate_invoice_extraction
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
-OPENAI_FALLBACK_ENABLED = os.getenv("OPENAI_FALLBACK_ENABLED", "true").lower() == "true"
+OPENAI_FALLBACK_ENABLED = os.getenv("OPENAI_FALLBACK_ENABLED", "false").lower() == "true"
 OPENAI_FALLBACK_MIN_CONFIDENCE = float(os.getenv("OPENAI_FALLBACK_MIN_CONFIDENCE", 0.7))
 OPENAI_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT", 40))
 

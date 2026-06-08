@@ -1,0 +1,8 @@
+Endesa Energia, S.A. Unipersonal.
+CIF A81948077.
+DATOS DE LA FACTURA DE ELECTRICIDAD
+N° factura: P26CON002747139
+Fecha emision factura: 22/01/2026
+Base imponible 30,58
+IVA 21% 6,42
+total factura 37,00

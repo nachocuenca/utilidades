@@ -1,0 +1,10 @@
+Orange Espagne S.A, CIF: A-82000612
+
+Factura
+orange
+Numero de factura Fecha de factura: Periodo facturado.
+401-KF26-39510 09/06/2026 01/04/2026 al 30/04/2026
+
+Total 52,00
+Total (antes de impuestos) 52,00
+IVA (21%) 10,92

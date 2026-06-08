@@ -302,12 +302,13 @@ def test_scanner_extracts_minimal_fields_for_tgss_no_fiscal_receipt(monkeypatch,
     summary = scanner.scan(recursive=True)
 
     assert summary.procesados == 1
-    assert summary.requieren_revision == 1
+    assert summary.requieren_revision == 0
 
     stored = repository.list_invoices()
     assert len(stored) == 1
     assert stored[0].tipo_documento == "no_fiscal"
     assert stored[0].parser_usado == "non_fiscal_receipt"
+    assert stored[0].requiere_revision_manual is False
     assert stored[0].nombre_proveedor == "Tesorería General de la Seguridad Social"
     assert stored[0].nombre_cliente == "Daniel Cuenca Moya"
     assert stored[0].numero_factura == "052107031089616611202105210047"
@@ -355,12 +356,13 @@ def test_scanner_extracts_minimal_fields_for_bank_receipt_no_fiscal(monkeypatch,
     summary = scanner.scan(recursive=True)
 
     assert summary.procesados == 1
-    assert summary.requieren_revision == 1
+    assert summary.requieren_revision == 0
 
     stored = repository.list_invoices()
     assert len(stored) == 1
     assert stored[0].tipo_documento == "no_fiscal"
     assert stored[0].parser_usado == "non_fiscal_receipt"
+    assert stored[0].requiere_revision_manual is False
     assert stored[0].nombre_cliente == "AUTONOMO PRUEBA SL"
     assert stored[0].nombre_proveedor == "SUMINISTROS AGUA MEDITERRANEO SL"
     assert stored[0].numero_factura == "REC-2026/0045"

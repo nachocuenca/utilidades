@@ -23,7 +23,7 @@ PERSON_NAME_TOKEN_PATTERN = re.compile(r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'/-
 
 class NonFiscalReceiptParser(BaseInvoiceParser):
     parser_name = "non_fiscal_receipt"
-    priority = 0
+    priority = 1000
     LOOKAHEAD_LINES = 12
 
     FEMPA_SUPPLIER_NAME = "Federaci\u00f3n de Empresarios del Metal de la provincia de Alicante"
@@ -148,6 +148,29 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
     }
 
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
+        normalized_for_invoice = self._normalize_for_matching(text)
+        if (
+            ("banco de sabadell" in normalized_for_invoice or "sabadell" in normalized_for_invoice)
+            and re.search(r"factura\s+n[°ºo]", normalized_for_invoice)
+        ):
+            return False
+
+        hard_fiscal_markers = (
+            "base imponible",
+            "cuota iva",
+            "importe iva",
+            "total factura",
+            "factura simplificada",
+            "numero de factura",
+            "n factura",
+        )
+        if any(marker in normalized_for_invoice for marker in hard_fiscal_markers):
+            return False
+        if re.search(r"\biva\s*\d", normalized_for_invoice) or (
+            "subtotal" in normalized_for_invoice and "total" in normalized_for_invoice
+        ):
+            return False
+
         # Be conservative: do not accept documents that look like invoices
         if self.looks_like_invoice_document(text):
             return False
@@ -167,6 +190,15 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
             "titular de la domiciliacion",
             "tgss",
             "fempa",
+            "pago por transferencia",
+            "confirminet.com",
+            "bs confirming",
+            "liquidacion proveedor por anticipo",
+            "liquidacion a proveedor",
+            "documento de pago correspondiente",
+            "envio de remesa de recibos",
+            "remesa de recibos",
+            "caixa rural",
         )
 
         # Supplementary (weaker) markers
@@ -216,6 +248,15 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
         if any(marker in normalized_text for marker in self.TGSS_MARKERS) or "tgss" in path_text:
             return "tgss"
 
+        if "sabadell" in normalized_text or "bs confirming" in normalized_text:
+            return "confirming"
+
+        if "bankinter" in normalized_text or "confirminet" in normalized_text:
+            return "bankinter"
+
+        if "remesa de recibos" in normalized_text or "caixa rural" in normalized_text:
+            return "remesa"
+
         return "generic"
 
     def extract_supplier_name(self, lines: list[str], profile: str) -> str | None:
@@ -224,6 +265,15 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
 
         if profile == "tgss":
             return self.TGSS_SUPPLIER_NAME
+
+        if profile == "confirming":
+            return "Banco de Sabadell, S.A."
+
+        if profile == "bankinter":
+            return "Bankinter, S.A."
+
+        if profile == "remesa":
+            return "Caixa Rural"
 
         labeled_candidates = self._extract_names_near_labels(
             lines,
@@ -262,6 +312,13 @@ class NonFiscalReceiptParser(BaseInvoiceParser):
         return fallback_candidates[0][1]
 
     def extract_supplier_tax_id(self, lines: list[str], profile: str) -> str | None:
+        if profile == "confirming":
+            return "A08000143"
+
+        if profile == "bankinter":
+            ids = self.extract_exact_tax_ids("\n".join(lines))
+            return ids[-1] if ids else None
+
         if profile != "fempa":
             return None
 

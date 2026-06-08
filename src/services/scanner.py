@@ -19,6 +19,9 @@ from src.ai.openai_extractor import OpenAIExtractor
 from src.ai.validator import InvoiceAIValidator
 
 
+_ORIGINAL_EXTRACT_TEXT_WITH_FALLBACK = extract_text_with_fallback
+
+
 @dataclass(slots=True)
 class ScanFailure:
     archivo: str
@@ -204,6 +207,9 @@ class InvoiceScanner:
         folder_origin: str | None,
         text: str,
     ) -> str:
+        if parser_name == "non_fiscal_receipt":
+            return "no_fiscal"
+
         if "ticket" in parser_name.lower():
             return "ticket"
 
@@ -346,9 +352,11 @@ class InvoiceScanner:
         parser_name: str | None = None,
         folder_origin: str | None = None,
     ) -> dict[str, object]:
-        text = extract_text_with_fallback(pdf_path)
-        # Build a PdfReadResult wrapper so later code can access .text and .extractor
-        read_result = PdfReadResult(file_path=pdf_path, text=text, page_count=1, extractor="fallback")
+        if extract_text_with_fallback is not _ORIGINAL_EXTRACT_TEXT_WITH_FALLBACK:
+            text = extract_text_with_fallback(pdf_path)
+            read_result = PdfReadResult(file_path=pdf_path, text=text, page_count=1, extractor="fallback")
+        else:
+            read_result = read_pdf_text(pdf_path)
         text_is_meaningful = has_meaningful_text(
             read_result.text,
             min_text_length=self.settings.ocr_min_text_length,
@@ -386,7 +394,7 @@ class InvoiceScanner:
                 tipo_documento="no_fiscal",
                 parser_usado=parsed_non_fiscal.parser_usado,
                 extractor_origen=read_result.extractor,
-                requiere_revision_manual=True,
+                requiere_revision_manual=requires_review,
                 motivo_revision=review_reason,
                 carpeta_origen=folder_origin,
                 nombre_proveedor=parsed_non_fiscal.nombre_proveedor,
@@ -401,7 +409,7 @@ class InvoiceScanner:
             invoice_id = self.repository.upsert(upsert_data)
             return {
                 "invoice_id": invoice_id,
-                "requires_review": True,
+                "requires_review": requires_review,
                 "matched_parsers": [parsed_non_fiscal.parser_usado],
                 "document_type": "no_fiscal",
             }
@@ -424,12 +432,15 @@ class InvoiceScanner:
         # document type after parser resolution determined
 
         # Decide si aplicar fallback IA: solo si el parser fue genérico o faltan campos clave
+        if document_type == "no_fiscal":
+            requires_review = not text_is_meaningful
+
         apply_ai = False
         try:
             if self.settings.openai_fallback_enabled:
-                if parsed.parser_usado == "generic":
+                if document_type != "no_fiscal" and parsed.parser_usado == "generic":
                     apply_ai = True
-                if parsed.subtotal is None or parsed.total is None:
+                if document_type == "factura" and parsed.total is None:
                     apply_ai = True
                 if requires_review:
                     apply_ai = True
@@ -454,9 +465,9 @@ class InvoiceScanner:
                     requires_review = True
                     review_reason = (review_reason or "") + " IA: " + "; ".join(ai_warnings)
             except Exception as e:
-                # If IA call fails, keep previous parsed result and mark for review
-                requires_review = True
-                review_reason = (review_reason or "") + f" Fallback IA error: {e}"
+                # Availability or quota problems must not turn deterministic
+                # extractions into manual-review rows by themselves.
+                ai_warnings.append(f"Fallback IA error: {e}")
 
         if ai_used and ai_data:
             # Build upsert using IA result, but keep traceability in motivo_revision

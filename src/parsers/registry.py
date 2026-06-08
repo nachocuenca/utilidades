@@ -27,6 +27,15 @@ from src.parsers.wurth import WurthInvoiceParser
 from src.parsers.spark import SparkInvoiceParser
 from src.parsers.beroil import BeroilInvoiceParser
 from src.parsers.daniel_fernandez import DanielFernandezInvoiceParser
+from src.parsers.amazon import AmazonInvoiceParser
+from src.parsers.b2mobility import B2MobilityInvoiceParser
+from src.parsers.bbva import BBVAInvoiceParser
+from src.parsers.brildor import BrildorInvoiceParser
+from src.parsers.endesa import EndesaInvoiceParser
+from src.parsers.lcm_agua import LcmAguaInvoiceParser
+from src.parsers.non_fiscal_receipt import NonFiscalReceiptParser
+from src.parsers.orange import OrangeInvoiceParser
+from src.parsers.sabadell import SabadellInvoiceParser
 
 
 @dataclass(slots=True)
@@ -42,6 +51,15 @@ class ParserRegistry:
 
     def _register_defaults(self) -> None:
         # Específicos alta prioridad
+        self.register(NonFiscalReceiptParser())
+        self.register(SabadellInvoiceParser())
+        self.register(AmazonInvoiceParser())
+        self.register(OrangeInvoiceParser())
+        self.register(BrildorInvoiceParser())
+        self.register(EndesaInvoiceParser())
+        self.register(BBVAInvoiceParser())
+        self.register(B2MobilityInvoiceParser())
+        self.register(LcmAguaInvoiceParser())
         self.register(LeroyMerlinInvoiceParser())
         self.register(ObramatInvoiceParser())
         self.register(SaltokiInvoiceParser())
