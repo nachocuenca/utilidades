@@ -4,19 +4,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from config.settings import get_settings
+from src.ai.openai_extractor import OpenAIExtractor
+from src.ai.validator import InvoiceAIValidator
 from src.db.models import InvoiceUpsertData
 from src.db.repositories import InvoiceRepository
 from src.parsers.non_fiscal_receipt import NonFiscalReceiptParser
 from src.parsers.registry import resolve_parser_with_trace
-from src.pdf.ocr import has_meaningful_text
 from src.pdf.extract_text_with_fallback import extract_text_with_fallback
-from src.pdf.reader import read_pdf_text
+from src.pdf.ocr import has_meaningful_text
 from src.pdf.reader import PdfReadResult
+from src.pdf.reader import read_pdf_text
 from src.utils.files import list_pdf_files
 from src.utils.hashing import sha256_file
 from src.utils.ids import normalize_postal_code, normalize_tax_id
-from src.ai.openai_extractor import OpenAIExtractor
-from src.ai.validator import InvoiceAIValidator
 
 
 _ORIGINAL_EXTRACT_TEXT_WITH_FALLBACK = extract_text_with_fallback
@@ -150,7 +150,6 @@ class InvoiceScanner:
         folder_origin: str | None,
     ) -> bool:
         normalized_text = self._normalize_text(text)
-        path_text = str(pdf_path).replace("\\", "/").lower()
         folder_text = (folder_origin or "").replace("\\", "/").lower().strip()
 
         folder_tokens = {token.strip() for token in folder_text.split("/") if token.strip()}
@@ -162,8 +161,12 @@ class InvoiceScanner:
             if fiscal_hits == 0:
                 return True
 
-        bank_strong_hits = sum(1 for marker in self.BANK_RECEIPT_STRONG_MARKERS if marker in normalized_text)
-        bank_support_hits = sum(1 for marker in self.BANK_RECEIPT_SUPPORT_MARKERS if marker in normalized_text)
+        bank_strong_hits = sum(
+            1 for marker in self.BANK_RECEIPT_STRONG_MARKERS if marker in normalized_text
+        )
+        bank_support_hits = sum(
+            1 for marker in self.BANK_RECEIPT_SUPPORT_MARKERS if marker in normalized_text
+        )
         fiscal_hits = sum(1 for marker in self.FISCAL_MARKERS if marker in normalized_text)
 
         if bank_strong_hits >= 2 and fiscal_hits == 0:
@@ -259,6 +262,60 @@ class InvoiceScanner:
 
         return True
 
+    def _join_review_reasons(self, reasons: list[str]) -> str | None:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+
+        for reason in reasons:
+            normalized = str(reason or "").strip()
+            if not normalized:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            cleaned.append(normalized)
+
+        return "; ".join(cleaned) if cleaned else None
+
+    def _apply_manual_review_policy(
+        self,
+        parsed: object,
+        document_type: str,
+        requires_review: bool,
+        review_reason: str | None,
+    ) -> tuple[bool, str | None]:
+        """
+        Política final de revisión manual.
+
+        - no_fiscal: no se valida como factura; solo mantiene revisión si ya venía
+          por causa real, normalmente OCR/texto insuficiente.
+        - factura: debe tener proveedor, número, fecha y total.
+        - ticket: de momento no se endurece para no romper tickets válidos.
+        """
+        if document_type == "no_fiscal":
+            return requires_review, review_reason
+
+        reasons: list[str] = []
+
+        if review_reason:
+            reasons.append(review_reason)
+
+        if document_type == "factura":
+            if not getattr(parsed, "nombre_proveedor", None):
+                reasons.append("Falta proveedor")
+
+            if not getattr(parsed, "numero_factura", None):
+                reasons.append("Falta número de factura")
+
+            if not getattr(parsed, "fecha_factura", None):
+                reasons.append("Falta fecha")
+
+            if getattr(parsed, "total", None) is None:
+                reasons.append("Falta total")
+
+        final_reason = self._join_review_reasons(reasons)
+        return final_reason is not None, final_reason
+
     def scan(
         self,
         parser_name: str | None = None,
@@ -300,7 +357,7 @@ class InvoiceScanner:
                     folder_origin=folder_origin,
                 )
 
-                invoice_id = result_info["invoice_id"]
+                invoice_id = int(result_info["invoice_id"])
                 requires_review = bool(result_info["requires_review"])
 
                 if invoice_id <= 0:
@@ -354,15 +411,19 @@ class InvoiceScanner:
     ) -> dict[str, object]:
         if extract_text_with_fallback is not _ORIGINAL_EXTRACT_TEXT_WITH_FALLBACK:
             text = extract_text_with_fallback(pdf_path)
-            read_result = PdfReadResult(file_path=pdf_path, text=text, page_count=1, extractor="fallback")
+            read_result = PdfReadResult(
+                file_path=pdf_path,
+                text=text,
+                page_count=1,
+                extractor="fallback",
+            )
         else:
             read_result = read_pdf_text(pdf_path)
+
         text_is_meaningful = has_meaningful_text(
             read_result.text,
             min_text_length=self.settings.ocr_min_text_length,
         )
-
-        # OCR quality logged internally; temporary audit prints removed
 
         requires_review = not text_is_meaningful
         review_reason: str | None = None
@@ -376,15 +437,7 @@ class InvoiceScanner:
             read_result.text,
         )
 
-        # inferred document type determined; temporary audit prints removed
-
         if pre_document_type == "no_fiscal":
-            non_fiscal_reason = "Documento detectado como no fiscal (recibo bancario, TGSS o administrativo)."
-            if review_reason:
-                review_reason = f"{review_reason} {non_fiscal_reason}"
-            else:
-                review_reason = non_fiscal_reason
-
             parsed_non_fiscal = self.non_fiscal_receipt_parser.parse(read_result.text, pdf_path)
 
             upsert_data = InvoiceUpsertData(
@@ -420,7 +473,7 @@ class InvoiceScanner:
             parser_name=parser_name,
         )
         parser = resolution.selected_parser
-        # matched parsers resolved
+
         parsed = parser.parse(read_result.text, pdf_path)
         document_type = self._infer_document_type_from_parser(
             parser_name=parsed.parser_usado,
@@ -429,9 +482,6 @@ class InvoiceScanner:
             text=read_result.text,
         )
 
-        # document type after parser resolution determined
-
-        # Decide si aplicar fallback IA: solo si el parser fue genérico o faltan campos clave
         if document_type == "no_fiscal":
             requires_review = not text_is_meaningful
 
@@ -450,35 +500,48 @@ class InvoiceScanner:
         ai_data = None
         ai_warnings: list[str] = []
         ai_used = False
+
         if apply_ai:
             try:
-                extractor = OpenAIExtractor(api_key=self.settings.openai_api_key, model=self.settings.openai_model)
-                # Context: provide minimal folder and matched parsers
+                extractor = OpenAIExtractor(
+                    api_key=self.settings.openai_api_key,
+                    model=self.settings.openai_model,
+                )
                 context = {
                     "folder_origin": folder_origin,
                     "matched_parsers": resolution.matched_parsers,
                 }
                 ai_data = extractor.extract_from_pdf(pdf_path, context=context)
                 ai_used = True
+
                 is_valid, ai_warnings = InvoiceAIValidator.validate(ai_data)
                 if not is_valid:
                     requires_review = True
-                    review_reason = (review_reason or "") + " IA: " + "; ".join(ai_warnings)
-            except Exception as e:
-                # Availability or quota problems must not turn deterministic
-                # extractions into manual-review rows by themselves.
-                ai_warnings.append(f"Fallback IA error: {e}")
+                    ai_reason = "; ".join(ai_warnings)
+                    review_reason = self._join_review_reasons(
+                        [review_reason or "", f"IA: {ai_reason}"]
+                    )
+
+            except Exception as error:
+                # Los problemas de disponibilidad/cuota de OpenAI no deben convertir
+                # una extracción determinista en revisión manual por sí solos.
+                ai_warnings.append(f"Fallback IA error: {error}")
 
         if ai_used and ai_data:
-            # Build upsert using IA result, but keep traceability in motivo_revision
             motivo = review_reason or ""
-            motivo = f"IA_used model={self.settings.openai_model} confidence={ai_data.get('confidence')}" + (f"; {motivo}" if motivo else "")
+            motivo = (
+                f"IA_used model={self.settings.openai_model} "
+                f"confidence={ai_data.get('confidence')}"
+                + (f"; {motivo}" if motivo else "")
+            )
+
+            ai_document_type = ai_data.get("tipo_documento", document_type)
 
             upsert_data = InvoiceUpsertData(
                 archivo=parsed.archivo,
                 ruta_archivo=parsed.ruta_archivo,
                 hash_archivo=file_hash,
-                tipo_documento=ai_data.get("tipo_documento", document_type),
+                tipo_documento=ai_document_type,
                 parser_usado=f"openai_{self.settings.openai_model}",
                 extractor_origen="openai",
                 requiere_revision_manual=requires_review,
@@ -497,6 +560,15 @@ class InvoiceScanner:
                 texto_crudo=parsed.texto_crudo,
             )
 
+            requires_review, motivo = self._apply_manual_review_policy(
+                parsed=upsert_data,
+                document_type=upsert_data.tipo_documento,
+                requires_review=requires_review,
+                review_reason=motivo,
+            )
+            upsert_data.requiere_revision_manual = requires_review
+            upsert_data.motivo_revision = motivo
+
             invoice_id = self.repository.upsert(upsert_data)
             return {
                 "invoice_id": invoice_id,
@@ -504,8 +576,14 @@ class InvoiceScanner:
                 "matched_parsers": resolution.matched_parsers + [upsert_data.parser_usado],
                 "document_type": upsert_data.tipo_documento,
             }
-        
-        # Si no se usó IA o IA no pudo resolverse, seguimos con el parser original
+
+        requires_review, review_reason = self._apply_manual_review_policy(
+            parsed=parsed,
+            document_type=document_type,
+            requires_review=requires_review,
+            review_reason=review_reason,
+        )
+
         upsert_data = InvoiceUpsertData(
             archivo=parsed.archivo,
             ruta_archivo=parsed.ruta_archivo,

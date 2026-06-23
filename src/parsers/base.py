@@ -358,19 +358,61 @@ class BaseInvoiceParser(ABC):
         return candidates[0] if candidates else None
 
     def extract_invoice_number(self, text: str) -> str | None:
-        patterns = [
-            r"(?:n[úu]mero\s+de\s+factura|num\.?\s+factura|n[ºo]\s*factura|factura)\s*[:#\-]?\s*([A-Z0-9\/\-.]+)",
-            r"(?:invoice\s+number|invoice\s+no)\s*[:#\-]?\s*([A-Z0-9\/\-.]+)",
+        def is_probable_date(value: str | None) -> bool:
+            if not value:
+                return False
+
+            candidate = value.strip()
+
+            return bool(
+                re.fullmatch(r"\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}", candidate)
+                or re.fullmatch(r"\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}", candidate)
+            )
+
+        def clean_candidate(value: str | None) -> str | None:
+            candidate = self.clean_invoice_number_candidate(value)
+            if not candidate:
+                return None
+
+            if is_probable_date(candidate):
+                return None
+
+            return candidate
+
+        line_patterns = [
+            # Número de factura: F-123 / Numero de factura: F-123 / Num. factura: F-123
+            r"(?:n[úu]mero|numero|num\.?)\s*(?:de\s*)?factura\s*[:#\-]?\s*([A-Z0-9][A-Z0-9\/\-.]{1,})",
+
+            # Nº factura: F-123 / N° factura: F-123 / No factura: F-123
+            r"n[º°o]\s*factura\s*[:#\-]?\s*([A-Z0-9][A-Z0-9\/\-.]{1,})",
+
+            # Factura nº: F-123 / Factura numero: F-123
+            r"factura\s*(?:n[º°o]|n[úu]mero|numero|num\.?)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9\/\-.]{1,})",
+
+            # Factura: F-123, solo si la línea empieza por Factura.
+            # Esto evita capturar "Fecha factura: 08/04/2026" como número.
+            r"^factura\s*[:#\-]\s*([A-Z0-9][A-Z0-9\/\-.]{1,})",
+
+            # Factura F-123, solo si empieza por Factura y el candidato tiene letras.
+            r"^factura\s+([A-Z]{1,6}[-\/]?[A-Z0-9\/\-.]{1,})",
+
+            # Inglés
+            r"(?:invoice\s+number|invoice\s+no)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9\/\-.]{1,})",
         ]
 
-        for pattern_text in patterns:
-            match = re.search(pattern_text, text, re.IGNORECASE)
-            if not match:
+        for line in self.extract_lines(text):
+            normalized_line = line.strip()
+            if not normalized_line:
                 continue
 
-            candidate = self.clean_invoice_number_candidate(match.group(1))
-            if candidate:
-                return candidate
+            for pattern_text in line_patterns:
+                match = re.search(pattern_text, normalized_line, re.IGNORECASE)
+                if not match:
+                    continue
+
+                candidate = clean_candidate(match.group(1))
+                if candidate:
+                    return candidate
 
         return None
 
