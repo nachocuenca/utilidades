@@ -237,13 +237,15 @@ class InvoiceScanner:
         default_tax_id = normalize_tax_id(self.settings.default_customer_tax_id)
         default_postal_code = normalize_postal_code(self.settings.default_customer_postal_code)
 
-        if default_name:
+        should_overwrite_customer = upsert_data.parser_usado in {"generic", "generic_supplier"}
+
+        if default_name and (should_overwrite_customer or not upsert_data.nombre_cliente):
             upsert_data.nombre_cliente = default_name
 
-        if default_tax_id:
+        if default_tax_id and (should_overwrite_customer or not upsert_data.nif_cliente):
             upsert_data.nif_cliente = default_tax_id
 
-        if default_postal_code:
+        if default_postal_code and (should_overwrite_customer or not upsert_data.cp_cliente):
             upsert_data.cp_cliente = default_postal_code
 
     def _should_apply_default_customer_context(

@@ -6,24 +6,52 @@ from pathlib import Path
 
 from src.parsers.base import BaseInvoiceParser, ParsedInvoiceData
 from src.utils.dates import normalize_date
-from src.utils.ids import normalize_postal_code
+from src.utils.ids import normalize_postal_code, normalize_tax_id
 from src.utils.names import clean_name_candidate
 
+SUPPLIER_NAME = "Francisco Amador Garcia"
+SUPPLIER_TAX_ID = "48321093W"
+COMMERCIAL_NAME = "Recambios Rhef"
+
+SUPPLIER_TAX_ID_PATTERN = re.compile(r"(?<![A-Z0-9])48321093[\s\-./]*W(?![A-Z0-9])", re.IGNORECASE)
 INVOICE_NUMBER_PATTERN = re.compile(r"\b(BFAC/\d{6})\b", re.IGNORECASE)
 DATE_PATTERN = re.compile(r"fecha\s+factura\s*[:\-]?\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})", re.IGNORECASE)
+CUSTOMER_TAX_ID_PATTERN = re.compile(r"\b(?:cif|nif)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\s\-./]{6,16})", re.IGNORECASE)
+
+SUPPLIER_NAME_MARKERS = (
+    "francisco amador garcia",
+)
+BRAND_MARKERS = (
+    "recambios rhef",
+    "recambiosrhef gmail com",
+)
+STRUCTURAL_MARKERS = (
+    "n cliente",
+    "n de factura",
+    "fecha factura",
+    "base imponible",
+    "total factura",
+)
 
 
 class RhefInvoiceParser(BaseInvoiceParser):
     parser_name = "rhef"
     priority = 340
 
-    SUPPLIER_NAME = "Francisco Amador Garcia"
-    SUPPLIER_TAX_ID = "48321093W"
-    COMMERCIAL_NAME = "Recambios Rhef"
-
     def can_handle(self, text: str, file_path: str | Path | None = None) -> bool:
         if self.looks_like_ticket_document(text, file_path):
             return False
+
+        if SUPPLIER_TAX_ID_PATTERN.search(text):
+            return True
+
+        if self._can_handle_by_supplier(
+            text,
+            supplier_name=SUPPLIER_NAME,
+            supplier_tax_id=SUPPLIER_TAX_ID,
+            file_path=file_path,
+        ):
+            return True
 
         normalized_text = self._normalize_for_match(text)
         score = 0
@@ -31,13 +59,10 @@ class RhefInvoiceParser(BaseInvoiceParser):
         if self.matches_file_path_hint(file_path, ("rhef", "recambios rhef")):
             score += 1
 
-        if "francisco amador garcia" in normalized_text:
+        if any(marker in normalized_text for marker in SUPPLIER_NAME_MARKERS):
             score += 3
 
-        if self.SUPPLIER_TAX_ID.lower() in normalized_text:
-            score += 3
-
-        if "recambiosrhef gmail com" in normalized_text or "recambios rhef" in normalized_text:
+        if any(marker in normalized_text for marker in BRAND_MARKERS):
             score += 2
 
         if self._has_rhef_layout(text):
@@ -52,14 +77,15 @@ class RhefInvoiceParser(BaseInvoiceParser):
         lines = self.extract_lines(text)
         result = self.build_result(text, file_path)
 
-        result.nombre_proveedor = self.SUPPLIER_NAME
-        result.nif_proveedor = self.SUPPLIER_TAX_ID
+        result.nombre_proveedor = SUPPLIER_NAME
+        result.nif_proveedor = SUPPLIER_TAX_ID
         result.nombre_cliente = self.extract_rhef_customer_name(lines)
+        result.nif_cliente = self.extract_rhef_customer_tax_id(lines)
         result.cp_cliente = self.extract_rhef_customer_postal_code(lines)
         result.numero_factura = self.extract_rhef_invoice_number(text)
         result.fecha_factura = self.extract_rhef_invoice_date(text)
         result.subtotal, result.iva, result.total = self.extract_rhef_tax_breakdown(lines)
-        result.metadatos["nombre_comercial"] = self.COMMERCIAL_NAME
+        result.metadatos["nombre_comercial"] = COMMERCIAL_NAME
 
         return result.finalize()
 
@@ -78,6 +104,24 @@ class RhefInvoiceParser(BaseInvoiceParser):
                 continue
 
             return cleaned.title()
+
+        return None
+
+    def extract_rhef_customer_tax_id(self, lines: list[str]) -> str | None:
+        customer_block = self._extract_customer_block(lines)
+
+        for line in customer_block:
+            match = CUSTOMER_TAX_ID_PATTERN.search(line)
+            if not match:
+                continue
+
+            candidate = normalize_tax_id(match.group(1))
+            if candidate and candidate != SUPPLIER_TAX_ID:
+                return candidate
+
+        for candidate in self._extract_customer_block_tax_ids(customer_block):
+            if candidate != SUPPLIER_TAX_ID:
+                return candidate
 
         return None
 
@@ -139,6 +183,16 @@ class RhefInvoiceParser(BaseInvoiceParser):
 
         return lines[start_index:end_index]
 
+    def _extract_customer_block_tax_ids(self, customer_block: list[str]) -> list[str]:
+        candidates: list[str] = []
+
+        for line in customer_block:
+            for candidate in self.extract_exact_tax_ids(line):
+                if candidate not in candidates:
+                    candidates.append(candidate)
+
+        return candidates
+
     def _extract_rhef_base_and_iva(self, lines: list[str]) -> tuple[float | None, float | None]:
         for index, line in enumerate(lines):
             normalized_line = self._normalize_for_match(line)
@@ -173,16 +227,7 @@ class RhefInvoiceParser(BaseInvoiceParser):
 
     def _has_rhef_layout(self, text: str) -> bool:
         normalized_text = self._normalize_for_match(text)
-        return all(
-            marker in normalized_text
-            for marker in (
-                "n cliente",
-                "n de factura",
-                "fecha factura",
-                "base imponible",
-                "total factura",
-            )
-        )
+        return all(marker in normalized_text for marker in STRUCTURAL_MARKERS)
 
     def _normalize_for_match(self, value: str) -> str:
         normalized = unicodedata.normalize("NFKD", value or "")

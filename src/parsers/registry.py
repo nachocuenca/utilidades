@@ -31,10 +31,12 @@ from src.parsers.amazon import AmazonInvoiceParser
 from src.parsers.b2mobility import B2MobilityInvoiceParser
 from src.parsers.bbva import BBVAInvoiceParser
 from src.parsers.brildor import BrildorInvoiceParser
+from src.parsers.carrefour import CarrefourInvoiceParser
 from src.parsers.endesa import EndesaInvoiceParser
 from src.parsers.lcm_agua import LcmAguaInvoiceParser
 from src.parsers.non_fiscal_receipt import NonFiscalReceiptParser
 from src.parsers.orange import OrangeInvoiceParser
+from src.parsers.ortoprono import OrtopronoInvoiceParser
 from src.parsers.sabadell import SabadellInvoiceParser
 
 
@@ -56,10 +58,12 @@ class ParserRegistry:
         self.register(AmazonInvoiceParser())
         self.register(OrangeInvoiceParser())
         self.register(BrildorInvoiceParser())
+        self.register(CarrefourInvoiceParser())
         self.register(EndesaInvoiceParser())
         self.register(BBVAInvoiceParser())
         self.register(B2MobilityInvoiceParser())
         self.register(LcmAguaInvoiceParser())
+        self.register(OrtopronoInvoiceParser())
         self.register(LeroyMerlinInvoiceParser())
         self.register(ObramatInvoiceParser())
         self.register(SaltokiInvoiceParser())
