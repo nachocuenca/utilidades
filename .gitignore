@@ -17,6 +17,7 @@ dist/
 
 # Testing / coverage
 .pytest_cache/
+.pytest_tmp/
 .coverage
 .coverage.*
 htmlcov/
@@ -48,3 +49,6 @@ data/exports/*
 
 # Logs
 *.log
+
+# Temporary audit outputs and generated work files
+tmp/
