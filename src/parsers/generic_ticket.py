@@ -139,12 +139,12 @@ class GenericTicketInvoiceParser(BaseInvoiceParser):
         return result.finalize()
 
     def extract_supplier_name(self, lines: List[str], file_path: str | Path) -> str | None:
-            ignored_patterns = [
-                re.compile(r"(?i)(factura\s+simplificada|subtotal|total|base|cuota|producto|importe|entregado|cambio|efectivo|tel[.:]|avenida|calle)"),
-                re.compile(r"(?i)(c/|c\.|poblacion|provincia)"),
-                re.compile(r"(?i)(informacion\s+adicional|referencia|cumplimiento|normativa)"),
-                re.compile(r"(?i)(nif\s+cliente|cliente)"),
-            ]
+        ignored_patterns = [
+            re.compile(r"(?i)(factura\s+simplificada|subtotal|total|base|cuota|producto|importe|entregado|cambio|efectivo|tel[.:]|avenida|calle)"),
+            re.compile(r"(?i)(c/|c\.|poblacion|provincia)"),
+            re.compile(r"(?i)(informacion\s+adicional|referencia|cumplimiento|normativa)"),
+            re.compile(r"(?i)(nif\s+cliente|cliente)"),
+        ]
 
         candidates = []
 

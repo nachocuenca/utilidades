@@ -69,6 +69,7 @@ class Settings:
     force_default_customer_for_facturas: bool
     default_customer_name: str
     default_customer_tax_id: str
+    default_customer_postal_code: str
 
 
 def ensure_runtime_directories(settings: Settings) -> None:
@@ -104,6 +105,7 @@ def get_settings() -> Settings:
         ),
         default_customer_name=_get_env("DEFAULT_CUSTOMER_NAME", ""),
         default_customer_tax_id=_get_env("DEFAULT_CUSTOMER_TAX_ID", ""),
+        default_customer_postal_code=_get_env("DEFAULT_CUSTOMER_POSTAL_CODE", ""),
     )
 
     ensure_runtime_directories(settings)

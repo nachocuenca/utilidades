@@ -1,0 +1,28 @@
+FACTURA 26A0720754 20/06/2026
+DATOS FACTURACIÓN
+Cliente Prueba Compra SL
+CALLE PRUEBA 15 4B
+BENIDORM (Alicante-Alacant) - 03502
+B23456789
+FORMA DE PAGO PAYPAL
+COD FACTURA 26A0720754 FECHA FACTURA 20/06/2026
+NÚM PEDIDO 75649982 FECHA PEDIDO 19/06/2026
+DETALLE DEL PEDIDO
+EAN Descripción artículo Cantidad IVA % PVP (€) Base Imponible PVP Total (€)
+3616958797816 Aire Acondicionado Portátil 1 21,00 269,00 222,31 269,00
+Carrefour Home
+HMAC12JTB-25
+Subtotal sin IVA 222,31
+IVA 21,00% 46,69
+Importe Líneas 269,00
+Base Imponible Gastos de Envío 0,00
+IVA Gastos de Envío 21,00% 0,00
+Total Gastos de Envío 0,00
+Total IVA 46,69
+Total Impuestos Incluidos 269,00
+TOTAL FACTURA 269,00
+INFORMACIÓN ADICIONAL
+Acumulado en Cheque Ahorro 0,00
+Carrefour S.A. - A-28425270 - Av. Transición Española, 36 "Omega" 28108 Alcobendas (Madrid) - www.carrefour.es
+Atención al Cliente www.carrefour.es/contacta-con-nosotros
+Centros comerciales Carrefour, S.A. Registro Mercantil de Madrid, al tomo 14.654, Sección 8, Hoja M-6.318
