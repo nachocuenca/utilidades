@@ -194,7 +194,7 @@ def test_saltoki_alicante_extracts_totals_and_header() -> None:
     )
 
     assert result.parser_usado == "saltoki"
-    assert result.nombre_proveedor == "SALTOKI ALICANTE"
+    assert result.nombre_proveedor == "SALTOKI ALICANTE, S.L."
     assert result.nif_proveedor == "B71406623"
     assert result.nombre_cliente == "Daniel Cuenca Moya"
     assert result.nif_cliente == "48334490J"
@@ -214,7 +214,7 @@ def test_saltoki_benidorm_extracts_totals_and_header() -> None:
     )
 
     assert result.parser_usado == "saltoki"
-    assert result.nombre_proveedor == "SALTOKI BENIDORM"
+    assert result.nombre_proveedor == "SALTOKI BENIDORM, S.L."
     assert result.nif_proveedor == "B71406607"
     assert result.nombre_cliente == "Daniel Cuenca Moya"
     assert result.nif_cliente == "48334490J"
@@ -234,7 +234,7 @@ def test_saltoki_benidorm_ocr_fragment_recovers_base_iva_total() -> None:
     )
 
     assert result.parser_usado == "saltoki"
-    assert result.nombre_proveedor == "SALTOKI BENIDORM"
+    assert result.nombre_proveedor == "SALTOKI BENIDORM, S.L."
     assert result.nif_proveedor == "B71406607"
     assert result.nombre_cliente == "Daniel Cuenca Moya"
     assert result.nif_cliente == "48334490J"
@@ -254,7 +254,7 @@ def test_saltoki_benidorm_ocr_fragment_with_split_rate_recovers_totals() -> None
     )
 
     assert result.parser_usado == "saltoki"
-    assert result.nombre_proveedor == "SALTOKI BENIDORM"
+    assert result.nombre_proveedor == "SALTOKI BENIDORM, S.L."
     assert result.nif_proveedor == "B71406607"
     assert result.numero_factura == "6475"
     assert result.fecha_factura == "31-01-2026"

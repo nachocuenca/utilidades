@@ -1,0 +1,10 @@
+bankinter
+Fecha Oficina Moneda Numero transferencia Hoja
+31-03-26 0645 - BENIDORM S.P EUR 202603310232728 1
+
+Pago por transferencia
+Anticipe el cobro de sus facturas en tiempo real. Todo ello en http://www.confirminet.com
+SUMINISTROS DE OFICINA BENIOFFI S.L.
+documento de Pago correspondiente a la/s facturas/s cuyos datos se reseñan
+Beneficiario Por cuenta de Importe
+SUMINISTROS DE OFICINA BENIOFFI S.L. 399,10

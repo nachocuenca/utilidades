@@ -164,11 +164,13 @@ class InvoiceRepository:
         offset: int = 0,
         only_manual_review: bool | None = None,
         tipo_documento: str | None = None,
+        carpeta_origen: str | None = None,
     ) -> list[InvoiceRecord]:
         where_clause, params = self._build_search_clause(
             search=search,
             only_manual_review=only_manual_review,
             tipo_documento=tipo_documento,
+            carpeta_origen=carpeta_origen,
         )
 
         query = f"""
@@ -219,11 +221,13 @@ class InvoiceRepository:
         search: str | None = None,
         only_manual_review: bool | None = None,
         tipo_documento: str | None = None,
+        carpeta_origen: str | None = None,
     ) -> int:
         where_clause, params = self._build_search_clause(
             search=search,
             only_manual_review=only_manual_review,
             tipo_documento=tipo_documento,
+            carpeta_origen=carpeta_origen,
         )
 
         query = f"""
@@ -245,11 +249,13 @@ class InvoiceRepository:
         search: str | None = None,
         only_manual_review: bool | None = None,
         tipo_documento: str | None = None,
+        carpeta_origen: str | None = None,
     ) -> list[dict[str, object | None]]:
         records = self.list_invoices(
             search=search,
             only_manual_review=only_manual_review,
             tipo_documento=tipo_documento,
+            carpeta_origen=carpeta_origen,
         )
 
         export_rows: list[dict[str, object | None]] = []
@@ -270,6 +276,7 @@ class InvoiceRepository:
         search: str | None,
         only_manual_review: bool | None = None,
         tipo_documento: str | None = None,
+        carpeta_origen: str | None = None,
     ) -> tuple[str, list[object]]:
         clauses: list[str] = []
         params: list[object] = []
@@ -287,6 +294,10 @@ class InvoiceRepository:
         if tipo_documento is not None and tipo_documento.strip() != "":
             clauses.append("tipo_documento = ?")
             params.append(tipo_documento.strip())
+
+        if carpeta_origen is not None and str(carpeta_origen).strip() != "":
+            clauses.append("carpeta_origen = ?")
+            params.append(str(carpeta_origen).strip())
 
         if not clauses:
             return "", []

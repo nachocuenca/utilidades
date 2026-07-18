@@ -23,7 +23,7 @@ NOISE_NAME_PATTERNS = [
     re.compile(r"\bempresa emisora\b", re.IGNORECASE),
     re.compile(r"\bcargo\b", re.IGNORECASE),
     re.compile(r"^BRICOLAJE\s*-\s*CONSTRUCCI[OÓ]N\s*-\s*DECORACI[OÓ]N\s*-\s*JARDINER[ÍI]A$", re.IGNORECASE),
-    re.compile(r"\bde la provincia de alicante\b", re.IGNORECASE),
+    re.compile(r"^\s*de la provincia de alicante\s*$", re.IGNORECASE),
     re.compile(r"\bsiempre cerca\b", re.IGNORECASE),
     re.compile(r"otnemucod", re.IGNORECASE),
     re.compile(r"n[oó]icpircsn[ií]", re.IGNORECASE),

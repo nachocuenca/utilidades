@@ -9,6 +9,7 @@ from src.ui.components import (
     build_invoice_option_label,
     get_invoice_service,
     open_folder_dialog,
+    render_export_download,
     render_scan_summary,
     render_summary_metrics,
 )
@@ -46,6 +47,10 @@ st.markdown(
     div[data-testid="stCaptionContainer"] {
         margin-bottom: 0rem;
     }
+
+    .st-key-tabla_documentos [data-testid="stDataFrame"] button {
+        display: none !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -65,6 +70,9 @@ if "selected_invoice_id" not in st.session_state:
 if "scan_dir_input" not in st.session_state:
     st.session_state["scan_dir_input"] = str(service.settings.inbox_dir)
 
+if "last_csv_export_path" not in st.session_state:
+    st.session_state["last_csv_export_path"] = None
+
 search_col, tipo_col = st.columns([8, 2])
 
 with search_col:
@@ -76,7 +84,7 @@ with search_col:
     )
     st.session_state["invoice_search"] = search
 
-tipo_options = ["todos", "factura", "ticket"]
+tipo_options = ["todos", "factura", "ticket", "no_fiscal"]
 with tipo_col:
     selected_document_type = st.selectbox(
         "Tipo",
@@ -177,22 +185,48 @@ render_scan_summary(st.session_state.get("last_scan_summary"))
 
 dataframe = service.list_invoices_dataframe(
     search=search or None,
-    visible_only=True,
+    visible_only=False,
     tipo_documento=document_type_filter,
 )
 
-st.subheader("Tabla de documentos")
+table_title_col, export_col = st.columns([4.5, 1.5])
+
+with table_title_col:
+    st.subheader("Tabla de documentos")
+
+with export_col:
+    if st.button(
+        "Preparar CSV Excel",
+        use_container_width=True,
+        disabled=dataframe.empty,
+    ):
+        csv_path = service.export_csv(
+            search=search or None,
+            tipo_documento=document_type_filter,
+        )
+        st.session_state["last_csv_export_path"] = str(csv_path)
 
 if dataframe.empty:
     st.info("No hay resultados guardados todavia.")
 else:
     dataframe = dataframe.copy()
 
+    render_export_download(
+        st.session_state.get("last_csv_export_path"),
+        label="Descargar CSV Excel",
+        mime="text/csv",
+    )
+    st.caption("La descarga nativa de la tabla queda desactivada para evitar CSV con formato incorrecto.")
+
     st.dataframe(
         dataframe,
+        key="tabla_documentos",
         use_container_width=True,
         hide_index=True,
         column_config={
+            "tipo_documento": "Tipo",
+            "parser_usado": "Parser",
+            "requiere_revision_manual": st.column_config.CheckboxColumn("Revisión"),
             "nombre_proveedor": "Nombre proveedor",
             "nif_proveedor": "NIF proveedor",
             "numero_factura": "Número factura",
@@ -202,6 +236,10 @@ else:
             "total": st.column_config.NumberColumn("Total", format="%.2f"),
             "nombre_cliente": "Nombre cliente",
             "nif_cliente": "NIF cliente",
+            "motivo_revision": "Motivo revisión",
+            "carpeta_origen": "Carpeta origen",
+            "archivo": "Archivo",
+            "extractor_origen": "Extractor",
         },
     )
 

@@ -1,0 +1,24 @@
+EDIEUROPA
+ELECTRODOMÉSTICOS Y MÁQUINAS S.L.
+CIF: B03310091
+
+CLIENTE: Tu Empresa SL
+NIF: A12345678
+Dirección: Calle Ejemplo 123, 03001 Alicante
+
+FECHA EMISIÓN: 15/10/2024
+Nº FACTURA: FAC-2024-0456
+
+DETALLE ARTÍCULOS
+Lavadora LG 10kg     450.00 €
+Secadora Balay       350.00 €
+
+SUBTOTAL ARTÍCULOS   800.00 €
+
+Base Imponible:         800.00 €
+IVA 21%:                168.00 €
+---------------------------
+TOTAL FACTURA:          968.00 €
+
+Pagadero en 30 días.
+Gracias por su compra.

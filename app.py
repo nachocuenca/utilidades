@@ -27,6 +27,11 @@ pages = [
         title="Detalle",
         icon="🔎",
     ),
+    st.Page(
+        "src/ui/pages/3_IA_Mode.py",
+        title="Modo IA",
+        icon="🤖",
+    ),
 ]
 
 with st.sidebar:

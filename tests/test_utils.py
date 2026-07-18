@@ -29,6 +29,14 @@ def test_normalize_date_returns_dd_mm_yyyy() -> None:
 def test_normalize_tax_id_removes_spaces_and_symbols() -> None:
     assert normalize_tax_id(" B-12345678 ") == "B12345678"
     assert normalize_tax_id("x 1234567 l") == "X1234567L"
+    assert normalize_tax_id("ES 48334490J") == "48334490J"
+
+
+def test_normalize_tax_id_rejects_ocr_garbage_and_iban_fragments() -> None:
+    assert normalize_tax_id("LCUENCAMOYA") is None
+    assert normalize_tax_id("LCUENCAMOYAEI") is None
+    assert normalize_tax_id("ES84 1465 0100 9417 6430 4696") is None
+    assert normalize_tax_id("A1B2C3D4") is None
 
 
 def test_name_helpers_reject_tax_ids_as_names() -> None:

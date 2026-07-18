@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import re
+import shutil
 
 from src.pdf.text_cleaner import normalize_pdf_text
 
@@ -61,6 +63,71 @@ def _configure_tesseract_cmd(tesseract_cmd: str | None = None) -> None:
         pytesseract.pytesseract.tesseract_cmd = tesseract_cmd.strip()
 
 
+def _split_language_codes(language: str) -> list[str]:
+    codes = [code.strip() for code in (language or "").split("+") if code.strip()]
+    return codes or ["eng"]
+
+
+def _has_required_traineddata(tessdata_dir: Path, language: str) -> bool:
+    if not tessdata_dir.exists() or not tessdata_dir.is_dir():
+        return False
+
+    return any((tessdata_dir / f"{code}.traineddata").exists() for code in _split_language_codes(language))
+
+
+def _iter_tessdata_candidates(tesseract_cmd: str | None = None) -> list[Path]:
+    raw_candidates: list[Path] = []
+
+    env_tessdata = os.environ.get("TESSDATA_PREFIX", "").strip()
+    if env_tessdata:
+        raw_candidates.append(Path(env_tessdata))
+
+    command_candidates = [
+        tesseract_cmd,
+        getattr(pytesseract.pytesseract, "tesseract_cmd", "") if pytesseract is not None else "",
+    ]
+
+    for command in command_candidates:
+        if not command or not str(command).strip():
+            continue
+
+        resolved_command = Path(str(command).strip())
+        if not resolved_command.is_absolute():
+            resolved_from_path = shutil.which(str(command).strip())
+            if resolved_from_path:
+                resolved_command = Path(resolved_from_path)
+
+        raw_candidates.append(resolved_command.parent / "tessdata")
+
+    raw_candidates.extend(
+        [
+            Path(r"C:\Program Files\Tesseract-OCR\tessdata"),
+            Path(r"C:\Program Files (x86)\Tesseract-OCR\tessdata"),
+        ]
+    )
+
+    candidates: list[Path] = []
+    seen: set[str] = set()
+
+    for candidate in raw_candidates:
+        candidate_str = str(candidate.resolve(strict=False)).lower()
+        if candidate_str in seen:
+            continue
+        seen.add(candidate_str)
+        candidates.append(candidate)
+
+    return candidates
+
+
+def _configure_tessdata_prefix(language: str, tesseract_cmd: str | None = None) -> None:
+    for candidate in _iter_tessdata_candidates(tesseract_cmd):
+        if not _has_required_traineddata(candidate, language):
+            continue
+
+        os.environ["TESSDATA_PREFIX"] = str(candidate)
+        return
+
+
 def ocr_pdf_text(
     pdf_path: str | Path,
     language: str = "spa+eng",
@@ -69,6 +136,7 @@ def ocr_pdf_text(
 ) -> OcrReadResult:
     _ensure_ocr_dependencies()
     _configure_tesseract_cmd(tesseract_cmd)
+    _configure_tessdata_prefix(language, tesseract_cmd)
 
     path = Path(pdf_path).resolve()
     if not path.exists():

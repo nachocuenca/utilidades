@@ -1,0 +1,9 @@
+LCM AGUA,.S.L.
+CIF:B05499983
+Suministros de Oficina Benioffi SL
+FACTURA
+FACTURA No: FECHA:
+0000002149 31/05/2026 ALICANTE
+Dto.p.p. Base I.V.A. Rec. Equival.
+36,00 36,00 10,0 3,60
+39,60 €

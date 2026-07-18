@@ -1,99 +1,36 @@
 # Arquitectura
 
-## Objetivo
+## Mapa real del proyecto
 
-Esta utilidad procesa facturas PDF desde una carpeta local, extrae informacion clave, la guarda en SQLite y la muestra en una interfaz local en Streamlit.
+El sistema actual es pequeno y bastante directo:
+- `config/settings.py`: lee `.env`, resuelve rutas y banderas de OCR / cliente por defecto.
+- `src/pdf/`: lectura con `pdfplumber` / `pypdf` y OCR con `pypdfium2` + `pytesseract`.
+- `src/parsers/`: registry + parsers especificos + genericos.
+- `src/services/scanner.py`: clasificacion `ticket` / `no_fiscal` / `factura`, resolucion de parser, cliente por defecto y persistencia.
+- `src/db/`: SQLite, upsert por hash y consultas para UI / export.
+- `src/services/exporter.py`: export CSV/XLSX.
+- `src/ui/`: tabla, detalle y reescaneo desde Streamlit.
 
-## Capas del proyecto
+## Invariantes que ya existen
 
-### 1. Configuracion
-- `config/settings.py`
-- Carga `.env`
-- Resuelve rutas locales
-- Garantiza que existan directorios de trabajo
+- El scanner clasifica `no_fiscal` antes de pasar por el registry.
+- El registry decide por prioridad descendente; si hay empate, manda el orden de registro.
+- La persistencia usa `hash_archivo` como clave unica de upsert.
+- En el snapshot `2026-04-09` los tipos documentales persistidos son `factura`, `ticket` y `no_fiscal`.
+- `matched_parsers` es una traza de runtime, no una columna persistida.
+- El cliente por defecto vive en scanner, no en la base.
 
-### 2. Base de datos
-- `src/db/database.py`
-- `src/db/models.py`
-- `src/db/repositories.py`
+## Lo importante para depurar
 
-Responsabilidades:
-- crear esquema SQLite
-- abrir conexiones
-- persistir y consultar facturas
-- exponer una capa simple para el resto de la app
+- Si falla la lectura: mirar `src/pdf/reader.py` y `src/pdf/ocr.py`.
+- Si falla la clasificacion `no_fiscal`: mirar `InvoiceScanner._looks_like_non_fiscal_document()`.
+- Si falla la resolucion de parser: mirar `src/parsers/registry.py`, `tests/test_parser_resolution.py` y `tests/test_parser_priorities.py`.
+- Si falla un proveedor: mirar su parser especifico y su test dedicado.
+- Si el dato se guardo mal: mirar `src/db/repositories.py` y el CSV mas reciente.
 
-### 3. Utilidades y lectura de PDF
-- `src/utils/*`
-- `src/pdf/*`
+## Documentacion viva
 
-Responsabilidades:
-- normalizar importes
-- normalizar fechas
-- limpiar NIF/CIF
-- detectar codigos postales
-- leer texto de PDFs
-- limpiar texto crudo para parsers
-
-### 4. Parsers
-- `src/parsers/base.py`
-- `src/parsers/registry.py`
-- `src/parsers/generic.py`
-- `src/parsers/maria.py`
-- `src/parsers/agus.py`
-
-Responsabilidades:
-- decidir que parser aplica
-- extraer campos de negocio
-- encapsular logica especifica por emisor
-- dejar desacoplada la evolucion futura
-
-### 5. Servicios
-- `src/services/scanner.py`
-- `src/services/exporter.py`
-- `src/services/invoice_service.py`
-
-Responsabilidades:
-- coordinar lectura de PDFs
-- resolver parser
-- guardar resultados
-- exportar CSV y XLSX
-- exponer operaciones listas para UI y scripts
-
-### 6. Interfaz local
-- `app.py`
-- `src/ui/components.py`
-- `src/ui/pages/*`
-
-Responsabilidades:
-- mostrar tabla de facturas
-- buscar y filtrar
-- reescanear carpeta
-- abrir detalle
-- descargar exportaciones
-
-## Flujo principal
-
-1. El usuario deja PDFs en `data/inbox/`
-2. El escaner lista archivos PDF
-3. Se lee el texto del PDF
-4. El registry resuelve el parser adecuado
-5. El parser devuelve datos normalizados
-6. El repositorio hace upsert en SQLite
-7. Streamlit muestra y exporta resultados
-
-## Criterios de diseno
-
-- local first
-- sin sobrearquitectura web
-- SQLite para persistencia simple
-- parsers desacoplados por emisor
-- texto crudo guardado para depuracion
-- estructura clara para GitHub y mantenimiento
-
-## Puntos de extension
-
-- nuevos parsers en `src/parsers/`
-- reglas nuevas de nombres, importes o fechas en `src/utils/`
-- nuevos filtros o acciones de UI en `src/ui/`
-- exportaciones adicionales en `src/services/exporter.py`
+- Estado del sistema: `docs/estado_actual.md`
+- Registry y parsers: `docs/parsers.md`
+- Flujo de parsing: `docs/flujo_parsing.md`
+- Bitacora verificada: `CHANGELOG.md`

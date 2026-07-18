@@ -34,7 +34,7 @@ def test_maria_parser_calculates_missing_subtotal(load_sample_text) -> None:
     assert result.parser_usado == "maria"
     assert result.nombre_proveedor == "María González Arranz"
     assert result.nombre_cliente == "NOVA STUDIO LAB"
-    assert result.nif_cliente == "A1B2C3D4"
+    assert result.nif_cliente == "B12345674"
     assert result.cp_cliente == "46001"
     assert result.numero_factura == "M-2026-002"
     assert result.fecha_factura == "07-04-2026"

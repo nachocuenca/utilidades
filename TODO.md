@@ -1,7 +1,13 @@
-# Tareas para corregir generic_ticket.py
+# Nota historica
 
-- [x] 1. Crear/editar src/parsers/generic_ticket.py con mejoras (can_handle estricto, proveedor/NIF filtrados, extractions robustas)
-- [x] 2. Añadir/expandir tests en tests/test_parser_generic.py (rechazo OCR, NIF correcto, can_handle rechazo largo)
-- [ ] 3. Ejecutar pytest tests/test_parser_generic.py para validar
-- [ ] 4. Si OK, git add/commit/push
+El contenido anterior de este archivo ya no representa trabajo pendiente del repo.
 
+Hecho verificado a `2026-04-09`:
+- la suite actual pasa `111` tests
+- el runtime ya incluye `no_fiscal`
+- Repsol, Mercaluz y Edieuropa ya no estan en el punto descrito por ese TODO
+
+Si hace falta trabajo nuevo, abrir un TODO nuevo basado en:
+- `docs/estado_actual.md`
+- `docs/parsers.md`
+- el CSV mas reciente en `data/exports/`
