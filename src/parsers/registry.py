@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.parsers.agus import AgusInvoiceParser
 from src.parsers.base import BaseInvoiceParser
+from src.parsers.carrefour import CarrefourInvoiceParser
 from src.parsers.edieuropa import EdieuropaInvoiceParser
 from src.parsers.eseaforms import EseaformsInvoiceParser
 from src.parsers.generic import GenericInvoiceParser
@@ -13,7 +14,9 @@ from src.parsers.generic_ticket import GenericTicketInvoiceParser
 from src.parsers.maria import MariaInvoiceParser
 from src.parsers.mercaluz import MercaluzInvoiceParser
 from src.parsers.obramat import ObramatInvoiceParser
+from src.parsers.ortoprono import OrtopronoInvoiceParser
 from src.parsers.repsol import RepsolInvoiceParser
+from src.parsers.rhef import RhefInvoiceParser
 from src.parsers.saltoki import SaltokiInvoiceParser
 
 
@@ -29,8 +32,11 @@ class ParserRegistry:
         self._register_defaults()
 
     def _register_defaults(self) -> None:
-        # Específicos alta prioridad primero
+        # Especificos alta prioridad primero
+        self.register(CarrefourInvoiceParser())
+        self.register(OrtopronoInvoiceParser())
         self.register(ObramatInvoiceParser())
+        self.register(RhefInvoiceParser())
         self.register(SaltokiInvoiceParser())
         self.register(RepsolInvoiceParser())
         self.register(EseaformsInvoiceParser())
@@ -38,10 +44,10 @@ class ParserRegistry:
         self.register(MercaluzInvoiceParser())
         # Generic ticket (prioridad media)
         self.register(GenericTicketInvoiceParser())
-        # Específicos bajos
+        # Especificos bajos
         self.register(MariaInvoiceParser())
         self.register(AgusInvoiceParser())
-        # Genéricos bajos
+        # Genericos bajos
         self.register(GenericSupplierInvoiceParser())
         self.register(GenericInvoiceParser())
 

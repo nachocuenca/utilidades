@@ -11,6 +11,7 @@ from src.pdf.ocr import has_meaningful_text
 from src.pdf.reader import read_pdf_text
 from src.utils.files import list_pdf_files
 from src.utils.hashing import sha256_file
+from src.utils.ids import normalize_postal_code, normalize_tax_id
 
 
 @dataclass(slots=True)
@@ -101,13 +102,18 @@ class InvoiceScanner:
             return
 
         default_name = self.settings.default_customer_name.strip()
-        default_tax_id = self.settings.default_customer_tax_id.strip()
+        default_tax_id = normalize_tax_id(self.settings.default_customer_tax_id)
+        default_postal_code = normalize_postal_code(self.settings.default_customer_postal_code)
+        should_overwrite_customer = upsert_data.parser_usado in {"generic", "generic_supplier"}
 
-        if default_name:
+        if default_name and (should_overwrite_customer or not upsert_data.nombre_cliente):
             upsert_data.nombre_cliente = default_name
 
-        if default_tax_id:
+        if default_tax_id and (should_overwrite_customer or not upsert_data.nif_cliente):
             upsert_data.nif_cliente = default_tax_id
+
+        if default_postal_code and (should_overwrite_customer or not upsert_data.cp_cliente):
+            upsert_data.cp_cliente = default_postal_code
 
     def scan(
         self,

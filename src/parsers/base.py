@@ -198,6 +198,59 @@ class BaseInvoiceParser(ABC):
         parent_name = re.sub(r"\s+", " ", parent_name).strip()
         return clean_name_candidate(parent_name)
 
+    def _normalize_lookup_text(self, value: str | None) -> str:
+        if not value:
+            return ""
+
+        import unicodedata
+
+        normalized = unicodedata.normalize("NFKD", value)
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        normalized = normalized.lower()
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _compact_lookup_text(self, value: str | None) -> str:
+        return self._normalize_lookup_text(value).replace(" ", "")
+
+    def _can_handle_by_supplier(
+        self,
+        text: str,
+        *,
+        supplier_name: str | None = None,
+        supplier_tax_id: str | None = None,
+        file_path: str | Path | None = None,
+    ) -> bool:
+        normalized_text = self._normalize_lookup_text(text)
+
+        if supplier_tax_id:
+            normalized_tax = normalize_tax_id(supplier_tax_id)
+            if normalized_tax and normalized_tax in self.extract_exact_tax_ids(text):
+                return True
+
+        normalized_name = ""
+        if supplier_name:
+            normalized_name = self._normalize_lookup_text(supplier_name)
+            if normalized_name:
+                pattern = re.compile(rf"(?<![a-z0-9]){re.escape(normalized_name)}(?![a-z0-9])")
+                if pattern.search(normalized_text):
+                    return True
+
+        if file_path:
+            path_text = self.get_path_text(file_path)
+            normalized_path = self._normalize_lookup_text(path_text)
+
+            if supplier_tax_id:
+                compact_tax = supplier_tax_id.replace(" ", "").lower()
+                if compact_tax and compact_tax in path_text:
+                    return True
+
+            compact_name = normalized_name.replace(" ", "")
+            if compact_name and compact_name in normalized_path.replace(" ", ""):
+                return True
+
+        return False
+
     @staticmethod
     def clean_invoice_number_candidate(value: str | None) -> str | None:
         """Filtra basura OCR en números de factura."""
